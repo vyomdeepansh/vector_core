@@ -1,12 +1,28 @@
-"""VectorCore aggregator v2: per-table aggregation at a shared dimension grain (no case-level joins)."""
-import os, json, sqlite3, time
+"""VectorCore aggregator v3 — three cross-filterable cubes, no case-level joins.
+
+main   : month x week x sub_pod x region x market x segment          -> every KPI measure
+agents : ldap  x month x sub_pod x region x market x segment         -> correlation + simulator
+det    : month x week x sub_pod x region x market x segment x l1 x l2 -> detractor counts
+
+Each measure is SUMmed inside its own table, then tables are outer-merged on the shared
+dimension keys. Ratios are only computed from summed numerators/denominators (in the
+browser), so cross-filtering never double-counts.
+"""
+import json
+import os
+import sqlite3
+import time
 from datetime import datetime, timezone
-import numpy as np
+
 import pandas as pd
 
-DIMS = {"month": "Time Series Month", "week": "Time Series Week", "sub_pod": "Product Sub Pod",
-        "region": "Sales Service Region", "market": "Sales Service Market",
-        "segment": "gCare Customer Segment (Final)"}
+DIM_COLS = {
+    "month": "Time Series Month", "week": "Time Series Week", "sub_pod": "Product Sub Pod",
+    "region": "Sales Service Region", "market": "Sales Service Market",
+    "segment": "gCare Customer Segment (Final)", "ldap": "Final Assignee Username Masked",
+}
+MAIN_DIMS = ["month", "week", "sub_pod", "region", "market", "segment"]
+AGENT_DIMS = ["ldap", "month", "sub_pod", "region", "market", "segment"]
 MEASURES = {
     "sentiment_raw": {
         "sent_num": "Case Sentiment Score (% Positive)", "sent_den": "Sentiment DR",
@@ -25,120 +41,123 @@ MEASURES = {
     "esc_raw": {"esc_num": "Escalations Opened"},
 }
 ALL_MEASURES = [a for m in MEASURES.values() for a in m]
+L1_COL = "Principal Negative Sentiment Driver Category"
+L2_COL = "Principal Negative Sentiment Driver"
+DETRACTOR_SQL = '"Sentiment DR" = 1 AND "Case Sentiment Score (% Positive)" = 0'
+_WARNINGS = set()
 
-def _cols(con, t):
-    return {r[1] for r in con.execute(f'PRAGMA table_info("{t}")')}
+
+def dim_expr(alias):
+    """SQL expression for a dimension. Shared with the drilldown API so filters match the cubes."""
+    col = f'CAST("{DIM_COLS[alias]}" AS TEXT)'
+    return f"SUBSTR({col}, 1, 10)" if alias == "week" else col
+
+
+def _cols(con, table):
+    return {r[1] for r in con.execute(f'PRAGMA table_info("{table}")')}
+
+
+def _dim_select(cols, dims):
+    return [f"COALESCE({dim_expr(a)}, '(blank)') AS {a}" if DIM_COLS[a] in cols else f"'(n/a)' AS {a}"
+            for a in dims]
+
 
 def _agg(con, table, dims):
     cols = _cols(con, table)
     if not cols:
         return None
-    d_sql = [f'COALESCE("{c}", \'(blank)\') AS {a}' if c in cols else f"'(n/a)' AS {a}" for a, c in dims.items()]
-    m_sql = []
-    for a, c in MEASURES[table].items():
-        if c in cols:
-            m_sql.append(f'SUM("{c}") AS {a}')
+    meas = []
+    for alias, col in MEASURES[table].items():
+        if col in cols:
+            meas.append(f'SUM("{col}") AS {alias}')
         else:
-            print(f"⚠️  {table}: column not found -> {c}")
-            m_sql.append(f"NULL AS {a}")
-    q = f'SELECT {", ".join(d_sql + m_sql)} FROM "{table}" GROUP BY {", ".join(dims)}'
-    return pd.read_sql_query(q, con)
+            _WARNINGS.add(f"{table}: column not found -> {col}")
+            meas.append(f"NULL AS {alias}")
+    sql = f'SELECT {", ".join(_dim_select(cols, dims) + meas)} FROM "{table}" GROUP BY {", ".join(dims)}'
+    return pd.read_sql_query(sql, con)
+
 
 def _combine(con, dims):
-    keys = list(dims)
     out = None
-    for t in MEASURES:
-        f = _agg(con, t, dims)
-        if f is not None:
-            out = f if out is None else out.merge(f, on=keys, how="outer")
-    for a in ALL_MEASURES:
-        if a not in out.columns:
-            out[a] = 0.0
+    for table in MEASURES:
+        part = _agg(con, table, dims)
+        if part is not None:
+            out = part if out is None else out.merge(part, on=dims, how="outer")
+    for m in ALL_MEASURES:
+        if m not in out.columns:
+            out[m] = 0.0
     out[ALL_MEASURES] = out[ALL_MEASURES].apply(pd.to_numeric, errors="coerce").fillna(0.0)
     return out
 
-def _r(n, d):  # ratio; 0.0 when the denominator is empty (keeps the current UI from crashing)
-    return round(float(n / d), 4) if d else 0.0
 
-def _kpis(s):
-    return {"sentiment": _r(s.sent_num, s.sent_den), "irt": _r(s.irt_num, s.irt_den),
-            "reopen": _r(s.reo_num, s.reo_den), "esc_rate": _r(s.esc_num, s.closed),
-            "consult": _r(s.con_num, s.con_den), "cht": _r(s.cht_num, s.cht_den),
-            "time_assigned": _r(s.asg_num, s.asg_den), "tfr": _r(s.tfr_num, s.tfr_den),
-            "tta": _r(s.tta_num, s.tta_den), "cases_closed": int(s.closed), "escalations": int(s.esc_num)}
+def _num(x):
+    x = float(x)
+    return int(x) if x.is_integer() else round(x, 4)
+
+
+def _pack(df, dims, measures):
+    """Columnar encoding: dimension values become indices into a sorted vocabulary."""
+    df = df[(df[measures] != 0).any(axis=1)].reset_index(drop=True)
+    vocab, cols = {}, {}
+    for a in dims:
+        s = df[a].astype(str)
+        vocab[a] = sorted(s.unique().tolist())
+        idx = {v: i for i, v in enumerate(vocab[a])}
+        cols[a] = s.map(idx).astype(int).tolist()
+    for m in measures:
+        cols[m] = [_num(x) for x in df[m].to_numpy()]
+    return {"dims": dims, "measures": measures, "vocab": vocab, "cols": cols, "rows": int(len(df))}
+
+
+def _det_cube(con):
+    cols = _cols(con, "sentiment_raw")
+    l1 = f'COALESCE("{L1_COL}", \'Not yet RCA\'\'d\')' if L1_COL in cols else "'Not yet RCA''d'"
+    l2 = f'COALESCE("{L2_COL}", \'(unspecified)\')' if L2_COL in cols else "'(unspecified)'"
+    sql = f'''SELECT {", ".join(_dim_select(cols, MAIN_DIMS))}, {l1} AS l1, {l2} AS l2, COUNT(*) AS det
+              FROM sentiment_raw WHERE {DETRACTOR_SQL}
+              GROUP BY {", ".join(MAIN_DIMS)}, l1, l2'''
+    return _pack(pd.read_sql_query(sql, con), MAIN_DIMS + ["l1", "l2"], ["det"])
+
+
+def _ratio(n, d):
+    return round(float(n / d), 4) if d else None
+
 
 def compute_complete_dashboard_payload(db_path="data/vector_core.db"):
+    _WARNINGS.clear()
     if not os.path.exists(db_path):
         return None
     con = sqlite3.connect(db_path)
-    if not _cols(con, "sentiment_raw"):
+    try:
+        if not _cols(con, "sentiment_raw"):
+            return None
+        main = _combine(con, MAIN_DIMS)
+        agents = _combine(con, AGENT_DIMS)
+        det = _det_cube(con)
+    finally:
         con.close()
-        return None
 
-    cube = _combine(con, DIMS)
-    total = cube[ALL_MEASURES].sum()
-
-    by_m = cube.groupby("month")[ALL_MEASURES].sum().sort_index()
-    trends = [{"period": m, **{k: _kpis(r)[k] for k in ("sentiment", "irt", "reopen", "esc_rate")},
-               "cases_closed": int(r.closed)} for m, r in by_m.iterrows() if m not in ("(blank)", "(n/a)")]
-
-    # Detractor categories: scored (DR=1) cases with score 0
-    s_cols = _cols(con, "sentiment_raw")
-    cat_col = "Principal Negative Sentiment Driver Category"
-    cat_expr = f'COALESCE("{cat_col}", \'Not yet RCA\'\'d\')' if cat_col in s_cols else "'Not yet RCA''d'"
-    cats = pd.read_sql_query(f'''
-        SELECT {cat_expr} AS l1,
-               SUM(CASE WHEN "Sentiment DR" = 1 AND "Case Sentiment Score (% Positive)" = 0 THEN 1 ELSE 0 END) AS det
-        FROM sentiment_raw GROUP BY 1 HAVING det > 0 ORDER BY det DESC''', con)
-    cat_tree = [{"id": r.l1, "name": r.l1, "levelNum": 1, "parentId": None, "hasChildren": False,
-                 "total": int(r.det), "share": _r(r.det, total.sent_den), "delta": 0.0}
-                for r in cats.itertuples()]
-
-    # Agent-level correlations, aggregated per table (no case join)
-    ag = _combine(con, {"ldap": "Final Assignee Username Masked"})
-    con.close()
-    ag = ag[(ag.closed >= 20) & (ag.sent_den > 0)].copy()
-    for k, (n, d) in {"sentiment": ("sent_num", "sent_den"), "irt": ("irt_num", "irt_den"),
-                      "reopen": ("reo_num", "reo_den"), "cht": ("cht_num", "cht_den")}.items():
-        ag[k] = np.where(ag[d] > 0, ag[n] / ag[d].replace(0, np.nan), np.nan)
-    ag["esc_rate"] = ag.esc_num / ag.closed
-    strip = []
-    for k, label, up in [("irt", "IRT 24h %", True), ("reopen", "Reopen %", False),
-                         ("esc_rate", "Esc Rate", False), ("cht", "CHT (min)", False)]:
-        v = ag[["sentiment", k]].dropna()
-        r = float(np.corrcoef(v[k], v["sentiment"])[0, 1]) if len(v) >= 5 and v[k].std() > 1e-9 and v["sentiment"].std() > 1e-9 else 0.0
-        strip.append({"key": k, "label": label, "r": round(r, 2), "aligned": bool(r > 0 if up else r < 0)})
-
-    feats = ["irt", "reopen", "esc_rate"]
-    v = ag[["sentiment", *feats]].dropna()
-    beta = {"irt": 0.0, "reopen": 0.0, "esc_rate": 0.0}
-    if len(v) >= 10:
-        X, y = v[feats].values, v["sentiment"].values
-        Xs, ys = (X - X.mean(0)) / (X.std(0) + 1e-9), (y - y.mean()) / (y.std() + 1e-9)
-        b = np.linalg.solve(Xs.T @ Xs / len(v) + 0.1 * np.eye(3), Xs.T @ ys / len(v))
-        beta = {f: round(float(b[i] * y.std() / (X[:, i].std() + 1e-9)), 4) for i, f in enumerate(feats)}
-
-    k = _kpis(total)
-    dims = {a: sorted(cube[a].astype(str).unique().tolist()) for a in DIMS}
-    columns = {a: cube[a].astype(str).map({x: i for i, x in enumerate(dims[a])}).astype(int).tolist() for a in DIMS}
-    columns.update({m: [round(float(x), 4) for x in cube[m]] for m in ALL_MEASURES})
-
+    t = main[ALL_MEASURES].sum()
+    kpis = {"sentiment": _ratio(t.sent_num, t.sent_den), "irt": _ratio(t.irt_num, t.irt_den),
+            "reopen": _ratio(t.reo_num, t.reo_den), "esc_rate": _ratio(t.esc_num, t.closed),
+            "consult": _ratio(t.con_num, t.con_den), "cht": _ratio(t.cht_num, t.cht_den),
+            "time_assigned": _ratio(t.asg_num, t.asg_den), "tfr": _ratio(t.tfr_num, t.tfr_den),
+            "tta": _ratio(t.tta_num, t.tta_den), "cases_closed": int(t.closed), "escalations": int(t.esc_num)}
     return {
-        "metadata": {"generated_at": datetime.now(timezone.utc).isoformat(), "grain": list(DIMS), "dims": dims,
-                     "dimensions": {"months": dims["month"], "pods": dims["sub_pod"],
-                                    "regions": dims["region"], "markets": dims["market"]}},
-        "kpis": k, "trends": trends, "cat_tree": cat_tree,
-        "correlations": {"unit": "Agent", "min_cases": 20, "n_agents": int(len(ag)), "strip": strip},
-        "simulator": {"base_sentiment": k["sentiment"], "beta": beta,
-                      "ranges": {"irt": {"lo": 0.5, "hi": 1.0, "base": k["irt"]},
-                                 "reopen": {"lo": 0.0, "hi": 0.4, "base": k["reopen"]},
-                                 "esc_rate": {"lo": 0.0, "hi": 0.03, "base": k["esc_rate"]}}},
-        "cube": {"rows": int(len(cube)), "columns": columns},
+        "metadata": {"generated_at": datetime.now(timezone.utc).isoformat(), "warnings": sorted(_WARNINGS)},
+        "kpis": kpis,
+        "cubes": {"main": _pack(main, MAIN_DIMS, ALL_MEASURES),
+                  "agents": _pack(agents, AGENT_DIMS, ALL_MEASURES),
+                  "det": det},
     }
+
 
 if __name__ == "__main__":
     t0 = time.time()
     p = compute_complete_dashboard_payload()
-    print(f"✓ compiled in {time.time() - t0:.2f}s | cube rows: {p['cube']['rows']:,} | "
-          f"payload: {len(json.dumps(p)) / 1024:.0f} KB")
+    body = json.dumps(p, separators=(",", ":"))
+    print(f"✓ compiled in {time.time() - t0:.1f}s | payload {len(body) / 1e6:.1f} MB | "
+          f"rows: { {k: v['rows'] for k, v in p['cubes'].items()} }")
+    for w in p["metadata"]["warnings"]:
+        print("⚠️ ", w)
     print(json.dumps(p["kpis"], indent=2))

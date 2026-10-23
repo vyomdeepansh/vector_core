@@ -3,76 +3,57 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VectorCore · Support Quality &amp; RCA Dashboard</title>
+  <title>VectorCore · Support Quality &amp; RCA</title>
 
-  <!-- ═══ BOOT GUARD ═══ -->
   <script>
+    /* Boot guard — surfaces startup errors on the loader */
     (function () {
-      var errs = [], slow = false;
-      function paint() {
-        var q = document.getElementById('loader-quote');
-        var a = document.getElementById('loader-quote-author');
-        if (!q) return;
-        if (errs.length) {
-          q.textContent = '⚠ Dashboard failed to start: ' + errs[0];
-          q.style.color = '#FB7185';
-          if (a) a.textContent = 'Details in Console (F12)';
-        } else if (slow) {
-          q.textContent = 'Still fetching the five data sources from the server…';
-        }
+      var errs = [];
+      function paint(msg, sub) {
+        var q = document.getElementById('loader-quote'), a = document.getElementById('loader-quote-author');
+        if (q) { q.textContent = msg; q.style.color = '#FB7185'; }
+        if (a) a.textContent = sub || 'Details in Console (F12)';
       }
+      window.__loaderError = paint;
       window.addEventListener('error', function (e) {
-        errs.push((e.message || 'Unknown error') + (e.lineno ? ' — line ' + e.lineno : ''));
-        paint();
+        errs.push(e.message || 'Unknown error');
+        paint('⚠ Dashboard failed to start: ' + errs[0] + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
       });
       document.addEventListener('DOMContentLoaded', function () {
-        paint();
         setTimeout(function () {
           if (window.__booted || errs.length) return;
-          if (typeof window.boot !== 'function') errs.push('boot() is not defined');
-          else slow = true;
-          paint();
+          var q = document.getElementById('loader-quote');
+          if (q) q.textContent = typeof window.boot !== 'function' ? '⚠ app.js did not load' : 'Still loading the analytical cubes…';
         }, 8000);
       });
     })();
   </script>
-
-  <!-- ═══ FOUC GUARD ═══ -->
   <script>
+    /* FOUC guard — resolve theme before first paint */
     (function () {
-      var MODE_KEY = 'sentimentRCA.themeMode', mode = 'auto';
-      try {
-        var s = localStorage.getItem(MODE_KEY);
-        if (s === 'auto' || s === 'light' || s === 'dark') mode = s;
-      } catch (e) {}
-      var resolved = mode;
-      if (mode === 'auto') {
-        var h = new Date().getHours();
-        resolved = (h >= 6 && h < 18) ? 'light' : 'dark';
-      }
-      document.documentElement.setAttribute('data-theme', resolved);
+      var mode = 'auto';
+      try { var s = localStorage.getItem('vc.themeMode'); if (s === 'auto' || s === 'light' || s === 'dark') mode = s; } catch (e) {}
+      var h = new Date().getHours();
+      var t = mode === 'auto' ? (h >= 6 && h < 18 ? 'light' : 'dark') : mode;
+      document.documentElement.setAttribute('data-theme', t);
       document.documentElement.setAttribute('data-theme-mode', mode);
     })();
   </script>
-
-  <!-- ═══ DATA PRE-FETCH ═══ -->
   <script>
-    (function () {
-      window.__dataPromise = fetch('/api/v1/vectors/summary')
-        .then(function (r) {
-          if (!r.ok) throw new Error('API server returned status: ' + r.status);
-          return r.json();
-        });
-    })();
+    /* Data pre-fetch — runs in parallel with asset loading */
+    window.__dataPromise = fetch('/api/v1/vectors/summary').then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error('API ' + r.status + ': ' + t); });
+      return r.json();
+    });
   </script>
 
-  <!-- ═══ MASTER STYLESHEET ═══ -->
   <link rel="stylesheet" href="/static/css/tailwind.css" />
   <link rel="stylesheet" href="/static/css/theme.css" />
+  <link rel="stylesheet" href="/static/css/components.css" />
 </head>
 <body class="p-6">
 
-  <!-- ═══ TESSERACT BOOT LOADER ═══ -->
+  <!-- ═══ LOADER ═══ -->
   <div class="logo-viewport" id="tesseract-loader">
     <div class="logo-stage">
       <div class="logo-halo"></div>
@@ -84,7 +65,7 @@
           <linearGradient id="czg3" x1="-0.1" y1="322" x2="911.3" y2="322" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#090086"/><stop offset="1" stop-color="#2f96a9"/></linearGradient>
           <linearGradient id="czg4" x1="447.7" y1="322" x2="1526.5" y2="322" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3b62ca"/><stop offset="1" stop-color="#93dfe3"/></linearGradient>
         </defs>
-        <path class="cz-facet" style="fill:url(#czg3)" d="m910.51 278.52l-260.56 366.48h-649.95l447.940-645z"/>
+        <path class="cz-facet" style="fill:url(#czg3)" d="m910.51 278.52l-260.56 366.48h-649.950l447.940-645z"/>
         <path class="cz-facet" style="fill:url(#czg4)" d="m1086.17 0l439.15 645-1077.38-645z"/>
         <path class="cz-facet" style="fill:url(#czg1)" d="m649.95 645l260.56 366.48-462.57 278.52-447.94-645z"/>
         <path class="cz-facet" style="fill:url(#czg2)" d="m1525.32 645l-439.15 645h-638.23z"/>
@@ -101,7 +82,7 @@
     </div>
     <div class="absolute bottom-12 left-1/2 -translate-x-1/2 w-[min(90vw,620px)] text-center px-6">
       <p id="loader-quote" class="loader-quote-text">Aligning the North Star…</p>
-      <p id="loader-quote-author" class="loader-quote-author">Loading Sentiment, RCA, IRT, Escalation &amp; EFC sources</p>
+      <p id="loader-quote-author" class="loader-quote-author">Loading Sentiment, IRT &amp; Escalation cubes</p>
     </div>
   </div>
 
@@ -109,53 +90,46 @@
   <header class="pb-5 border-b border-slate-800 mb-6">
     <div class="flex flex-wrap justify-between items-start gap-4 pb-4">
       <div>
-        <div class="flex items-center space-x-3">
-          <span class="cz-dot w-3.5 h-3.5 bg-amber-400"></span>
+        <div class="flex items-center gap-3">
+          <span class="cz-dot bg-amber-400"></span>
           <h1 class="text-2xl font-bold tracking-tight text-white">Sentiment Moonshot · Support Quality &amp; RCA</h1>
-          <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10.5px] font-semibold tracking-wider font-mono uppercase">go/vector_core</span>
+          <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10.5px] font-semibold tracking-wider font-mono">go/vector_core</span>
         </div>
-        <p class="text-xs text-slate-400 mt-1">North Star: <b class="text-amber-400">Sentiment %</b> · 8 Vehicles · Pearson Correlation · What-If Simulation · Case Level Data</p>
+        <p class="text-xs text-slate-400 mt-1">North Star: <b class="text-amber-400">Sentiment %</b> · 8 Vehicles · Pearson Correlation · What-If Simulation · Case Level Data · <span id="data-stamp" class="font-mono"></span></p>
       </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="flex items-center gap-2">
-          <div class="seg-toggle seg-3" id="segToggleTheme" data-val="auto" title="Light / Dark">
-            <span class="seg-thumb"></span>
-            <button type="button" class="seg-opt active" data-val="auto">Auto</button>
-            <button type="button" class="seg-opt" data-val="light">Light</button>
-            <button type="button" class="seg-opt" data-val="dark">Dark</button>
-          </div>
-          <span id="themeAutoHint" class="font-mono text-[11px] text-slate-500">—</span>
+      <div class="flex items-center gap-2">
+        <div class="seg-toggle seg-3" id="segToggleTheme" data-val="auto" title="Light / Dark">
+          <span class="seg-thumb"></span>
+          <button type="button" class="seg-opt active" data-val="auto">Auto</button>
+          <button type="button" class="seg-opt" data-val="light">Light</button>
+          <button type="button" class="seg-opt" data-val="dark">Dark</button>
         </div>
+        <span id="themeAutoHint" class="font-mono text-[11px] text-slate-500">—</span>
       </div>
     </div>
 
-    <!-- 🗺️ Global Filters -->
-    <div class="flex flex-wrap items-center gap-2 pb-4">
-      <div class="ms-container" data-ms="months"             data-caption="Month"></div>
-      <div class="ms-container" data-ms="weeks"              data-caption="Week"></div>
-      <div class="ms-container" data-ms="pods"               data-caption="Pod"></div>
-      <div class="ms-container" data-ms="sdms"               data-caption="SDM"></div>
-      <div class="ms-container" data-ms="tls"                data-caption="TL"></div>
-      <div class="ms-container" data-ms="regions"            data-caption="Region"></div>
-      <div class="ms-container" data-ms="markets"            data-caption="Market"></div>
-      <div class="ms-container" data-ms="segments"           data-caption="Segment"></div>
-      <div class="ms-container" data-ms="submitterFunctions" data-caption="Function"></div>
-      <div class="ms-container" data-ms="l1"                 data-caption="L1 Category"></div>
-      <button type="button" class="cz-btn" onclick="resetAllFilters()" title="Clear all global filters">↺ Reset</button>
+    <!-- Global filters (keys must match FILTER_DIMS in app.js) -->
+    <div class="flex flex-wrap items-center gap-2 pb-3">
+      <div class="ms-container" data-ms="month"></div>
+      <div class="ms-container" data-ms="week"></div>
+      <div class="ms-container" data-ms="sub_pod"></div>
+      <div class="ms-container" data-ms="region"></div>
+      <div class="ms-container" data-ms="market"></div>
+      <div class="ms-container" data-ms="segment"></div>
+      <button type="button" class="cz-btn" data-reset-all title="Clear all filters">↺ Reset</button>
     </div>
+    <div id="filter-chips" class="vc-chips pb-4"></div>
 
-    <!-- Tab Navigation -->
     <nav class="flex flex-wrap gap-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800 w-fit" role="tablist">
-      <button type="button" id="btn-tab-overview"    data-tab="overview"    role="tab" class="tab-btn active">🌙 Overview<kbd class="tab-key">1</kbd></button>
+      <button type="button" id="btn-tab-overview" data-tab="overview" role="tab" class="tab-btn active">🌙 Overview<kbd class="tab-key">1</kbd></button>
       <button type="button" id="btn-tab-correlation" data-tab="correlation" role="tab" class="tab-btn">📈 Correlation<kbd class="tab-key">2</kbd></button>
-      <button type="button" id="btn-tab-simulator"   data-tab="simulator"   role="tab" class="tab-btn">🪐 What-If Simulator<kbd class="tab-key">3</kbd></button>
-      <button type="button" id="btn-tab-cases"       data-tab="cases"       role="tab" class="tab-btn">🗂 Case Level Data<kbd class="tab-key">4</kbd></button>
+      <button type="button" id="btn-tab-simulator" data-tab="simulator" role="tab" class="tab-btn">🪐 What-If Simulator<kbd class="tab-key">3</kbd></button>
+      <button type="button" id="btn-tab-cases" data-tab="cases" role="tab" class="tab-btn">🗂 Case Level Data<kbd class="tab-key">4</kbd></button>
     </nav>
   </header>
 
   <!-- ══════════ TAB 1 — OVERVIEW ══════════ -->
-  <section id="tab-overview" role="tabpanel" class="block">
+  <section id="tab-overview" role="tabpanel">
     <div class="mb-4 flex flex-wrap items-center justify-between bg-gradient-to-r from-cyan-950/30 via-slate-900/80 to-transparent p-3 rounded-xl border border-cyan-900/30 gap-3">
       <div class="flex items-center gap-3">
         <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Period Granularity</span>
@@ -173,42 +147,56 @@
       <div id="ov-vehicles" class="xl:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-3"></div>
     </div>
 
-    <!-- KPI Matrix -->
-    <div class="golden-card overflow-x-auto mb-6">
-      <div class="p-3.5 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
-        <div class="flex items-center space-x-2">
-          <span class="cz-dot w-2.5 h-2.5 bg-amber-400"></span>
-          <h3 class="text-xs font-bold text-white tracking-wide uppercase">North Star &amp; Vehicle KPI Matrix</h3>
+    <!-- Cross-filter explorer -->
+    <div class="golden-card p-4 mb-6">
+      <div class="flex flex-wrap justify-between items-center gap-3 mb-3">
+        <div class="flex items-center gap-2">
+          <span class="cz-dot"></span>
+          <h3 class="text-xs font-bold text-white tracking-wide uppercase">Cross-Filter Explorer</h3>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-[11px] text-slate-500 font-mono">Click a bar or period to filter · click again to remove</span>
+          <label class="corr-ctl">Metric <select id="x-kpi" class="cz-select"></select></label>
         </div>
       </div>
-      <table class="w-full text-xs text-left" id="kpiSummaryTable">
-        <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-semibold">
-          <tr id="kpiHeaderRow"></tr>
-        </thead>
+      <div class="vc-chart mb-4"><div class="vc-chart-title"><span id="x-trend-title">Trend</span><span>Bars = cases closed · line = metric · dashed = target</span></div><div id="x-trend"></div></div>
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div class="vc-chart"><div class="vc-chart-title"><span>By Pod · top 15 by volume</span><span>worst first</span></div><div id="x-pod"></div></div>
+        <div class="vc-chart"><div class="vc-chart-title"><span>By Region</span></div><div id="x-region"></div></div>
+        <div class="vc-chart"><div class="vc-chart-title"><span>By Segment</span></div><div id="x-segment"></div></div>
+      </div>
+    </div>
+
+    <!-- KPI matrix -->
+    <div class="golden-card overflow-x-auto mb-6">
+      <div class="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center gap-2">
+        <span class="cz-dot bg-amber-400"></span>
+        <h3 class="text-xs font-bold text-white tracking-wide uppercase">North Star &amp; Vehicle KPI Matrix</h3>
+        <span class="text-[11px] text-slate-500 font-mono ml-auto">Green / red = vs target · Δ coloured by direction of good</span>
+      </div>
+      <table class="w-full text-xs text-left">
+        <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-semibold"><tr id="kpiHeaderRow"></tr></thead>
         <tbody id="kpiSummaryBody" class="divide-y divide-slate-800/40"></tbody>
       </table>
     </div>
 
-    <!-- Category Breakdown -->
-    <div class="golden-card overflow-x-auto" id="card-cat-breakdown">
+    <!-- Category breakdown -->
+    <div class="golden-card overflow-x-auto">
       <div class="p-3.5 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
         <div class="flex items-center gap-2">
-          <span class="cz-dot cz-dot-rose w-2.5 h-2.5"></span>
-          <h3 id="catBreakdownTitle" class="text-xs font-bold text-white tracking-wide uppercase">Category Breakdown · Sentiment Detractors</h3>
-          <span id="catUnclassifiedBadge" class="text-[10.5px] font-mono text-amber-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">—</span>
+          <span class="cz-dot cz-dot-rose"></span>
+          <h3 class="text-xs font-bold text-white tracking-wide uppercase">Category Breakdown · Sentiment Detractors</h3>
+          <span id="catBadge" class="text-[10.5px] font-mono text-amber-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">—</span>
         </div>
-        <div class="flex flex-wrap items-center gap-1.5">
+        <div class="flex items-center gap-1.5">
           <span class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider mr-1">Depth</span>
-          <button type="button" id="cat-lvl-btn-l1" class="lvl-btn active" onclick="setCatBreakdownDepth('l1')">L1 Category</button>
-          <button type="button" id="cat-lvl-btn-l2" class="lvl-btn" onclick="setCatBreakdownDepth('l2')">L2 Driver</button>
-          <button type="button" id="cat-lvl-btn-l3" class="lvl-btn" onclick="setCatBreakdownDepth('l3')">L3 Component</button>
-          <button type="button" id="cat-lvl-btn-l4" class="lvl-btn" onclick="setCatBreakdownDepth('l4')">L4 Detail</button>
+          <button type="button" class="lvl-btn active" data-depth="1">L1 Category</button>
+          <button type="button" class="lvl-btn" data-depth="2">L2 Driver</button>
         </div>
       </div>
-      <table class="w-full text-xs text-left mt-2" id="matrixTable">
-        <thead class="bg-slate-900 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-semibold">
-          <tr id="matrixHeaderRow"></tr>
-        </thead>
+      <p class="px-4 pt-3 text-[11px] text-slate-500">Each cell = detractors in that category ÷ scored cases in the period. L1 rows sum to (1 − Sentiment %). Click a row to open its cases.</p>
+      <table class="w-full text-xs text-left mt-2">
+        <thead class="bg-slate-900 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-semibold"><tr id="matrixHeaderRow"></tr></thead>
         <tbody id="matrixBody" class="divide-y divide-slate-800/40"></tbody>
       </table>
     </div>
@@ -219,20 +207,52 @@
     <div class="golden-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="text-sm font-semibold text-white">Sentiment Correlation Lab</h3>
-        <p class="text-[11px] text-slate-500">Pearson r (with Spearman ρ check) between Sentiment % and each Vehicle.</p>
+        <p class="text-[11px] text-slate-500">Pearson r (with Spearman ρ check) between Sentiment % and each Vehicle. * p&lt;0.05 · ** p&lt;0.01 · *** p&lt;0.001</p>
+        <p id="corr-note" class="text-[11px] text-amber-400 mt-1"></p>
       </div>
-      <div id="corr-controls" class="flex flex-wrap items-center gap-3"></div>
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="corr-ctl">Unit of analysis <select id="corr-unit" class="cz-select"></select></label>
+        <label class="corr-ctl">Min cases / unit <input id="corr-min" type="number" min="1" max="500" value="20" class="cz-input w-20"></label>
+      </div>
     </div>
     <div id="corr-insights" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4"></div>
     <div class="golden-card p-5 mb-4">
-      <div id="corr-strip" class="w-full"></div>
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-sm font-semibold text-white">Sentiment Correlation Strip</h3>
+        <span class="text-[11px] text-slate-500 font-mono">✓ expected direction · ✗ unexpected · click a bar to plot it</span>
+      </div>
+      <div id="corr-strip"></div>
     </div>
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
       <div class="golden-card p-5">
-        <div id="corr-heatmap" class="w-full flex justify-center"></div>
+        <div class="flex justify-between items-center mb-2">
+          <h3 class="text-sm font-semibold text-white">Correlation Matrix Heatmap</h3>
+          <span class="text-[11px] text-slate-500 font-mono">Click a cell to load the scatter</span>
+        </div>
+        <div id="corr-heatmap" class="flex justify-center"></div>
       </div>
       <div class="golden-card p-5">
-        <div id="corr-scatter" class="w-full"></div>
+        <h3 id="corr-scatter-title" class="text-sm font-semibold text-white mb-1">Scatter</h3>
+        <p id="corr-scatter-hint" class="text-[11px] text-slate-500 mb-2">Bubble size = cases · dashed = weighted fit · green = target · red = outlier</p>
+        <div id="corr-scatter"></div>
+      </div>
+    </div>
+    <div class="golden-card overflow-hidden">
+      <div class="p-3.5 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+        <div class="flex items-center gap-2">
+          <span class="cz-dot cz-dot-rose"></span>
+          <h3 class="text-xs font-bold text-white tracking-wide uppercase">Outlier Detection</h3>
+          <span id="corr-outliers-badge" class="text-xs font-mono text-cyan-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">—</span>
+        </div>
+        <span class="text-[11px] text-slate-500 font-mono">Robust z (MAD) on metrics · model residual z for over/under-performers</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs text-left">
+          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider">
+            <tr><th class="py-2.5 px-3">Type</th><th class="py-2.5 px-3">Unit</th><th class="py-2.5 px-3">Metric</th><th class="py-2.5 px-3 text-right">Value</th><th class="py-2.5 px-3 text-right">Reference</th><th class="py-2.5 px-3 text-right">Score (z)</th><th class="py-2.5 px-3 text-right">Cases</th><th class="py-2.5 px-3 text-right">Sentiment</th></tr>
+          </thead>
+          <tbody id="corr-outliers-body" class="divide-y divide-slate-800/40"></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -242,7 +262,7 @@
     <div class="golden-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h3 class="text-sm font-semibold text-white">What-If Simulator</h3>
-        <p class="text-[11px] text-slate-500">Move the Vehicles to see predicted Sentiment % update live in 3D.</p>
+        <p class="text-[11px] text-slate-500">Move the Vehicles to see predicted Sentiment % update live. Ridge model fit on the current filter scope (directional, not a forecast).</p>
       </div>
       <div id="sim-controls" class="flex flex-wrap items-center gap-3"></div>
     </div>
@@ -252,11 +272,13 @@
         <div id="sim-sliders"></div>
       </div>
       <div class="golden-card p-3 xl:col-span-6">
-        <div id="sim-canvas" class="w-full"></div>
+        <div id="sim-canvas"></div>
+        <p class="text-[10.5px] text-slate-500 text-center mt-2 font-mono">Drag to orbit · Scroll to zoom · Taller pillar = healthier Vehicle · Beam brightness = influence</p>
       </div>
       <div class="xl:col-span-3 flex flex-col gap-4">
         <div class="golden-card p-4" id="sim-readout"></div>
         <div class="golden-card p-4">
+          <h4 class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Contribution to Δ Sentiment</h4>
           <div id="sim-contrib"></div>
         </div>
       </div>
@@ -267,42 +289,46 @@
   <section id="tab-cases" role="tabpanel" class="hidden">
     <div class="golden-card overflow-hidden">
       <div class="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
-        <h3 class="text-sm font-semibold text-white">Case Level Data</h3>
+        <div>
+          <h3 class="text-sm font-semibold text-white">Case Level Data</h3>
+          <p class="text-[11px] text-slate-500">Server-paginated rows. Sentiment rows are case × time-slice records (~3.6 per case). Click a header to sort.</p>
+        </div>
         <div id="cld-subtabs" class="flex flex-wrap gap-1.5"></div>
       </div>
       <div id="cld-toolbar" class="p-3 border-b border-slate-800 flex flex-wrap items-center gap-3"></div>
       <div class="overflow-x-auto min-h-[420px] max-h-[64vh]">
         <table class="w-full text-xs text-left">
-          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider sticky top-0 z-10">
-            <tr id="cld-head-row"></tr>
-          </thead>
+          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider sticky top-0 z-10"><tr id="cld-head"></tr></thead>
           <tbody id="cld-body" class="divide-y divide-slate-800/60"></tbody>
         </table>
       </div>
-      <div data-pager="cld"></div>
+      <div id="cld-pager"></div>
     </div>
   </section>
 
-  <!-- ═══ MODAL ═══ -->
-  <div id="caseModal" class="fixed inset-0 z-50 backdrop-blur-md hidden flex items-center justify-center p-4" onclick="if (event.target.id === 'caseModal') closeCaseModal();">
-    <div class="golden-card w-full max-w-[94vw] max-h-[90vh] flex flex-col overflow-hidden border-cyan-500/40" onclick="event.stopPropagation()">
-      <div class="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center">
-        <h3 class="text-sm font-bold text-white" id="modalCategoryTitle">Detractor Cases</h3>
-        <button type="button" onclick="closeCaseModal()" class="cz-btn">✕ Close</button>
+  <!-- ══════════ DETRACTOR DRILL MODAL ══════════ -->
+  <div id="caseModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4">
+    <div class="golden-card animate-modal w-full max-w-[94vw] max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="text-sm font-bold text-white" id="modalTitle">Detractor Cases</h3>
+            <span class="text-xs font-mono text-cyan-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700" id="modalCount">0</span>
+          </div>
+          <p class="text-[11px] text-slate-400 font-mono mt-0.5" id="modalCrumb">Category Breakdown</p>
+        </div>
+        <button type="button" class="cz-btn" data-modal-close>✕ Close</button>
       </div>
-      <div class="overflow-x-auto flex-1 max-h-[58vh]">
-        <table class="w-full text-xs text-left" id="modalCasesTable">
-          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider sticky top-0 z-10">
-            <tr id="modalHeadRow"></tr>
-          </thead>
-          <tbody id="modalCasesBody" class="divide-y divide-slate-800/60"></tbody>
+      <div class="overflow-x-auto flex-1 max-h-[62vh]">
+        <table class="w-full text-xs text-left">
+          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider sticky top-0 z-10"><tr id="modalHead"></tr></thead>
+          <tbody id="modalBody" class="divide-y divide-slate-800/60"></tbody>
         </table>
       </div>
-      <div data-pager="modal"></div>
+      <div id="modal-pager"></div>
     </div>
   </div>
 
-  <!-- ═══ LOCAL LIBS & CLIENT LOGIC ═══ -->
   <script src="/static/js/d3.v7.min.js"></script>
   <script src="/static/js/three.min.js"></script>
   <script src="/static/js/app.js"></script>

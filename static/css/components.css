@@ -1,0 +1,117 @@
+/* ═══════════════════════════════════════════════════════════════
+   VectorCore · components.css — styles for the v3 interactive layer.
+   Loaded AFTER theme.css. Edit by hand; never a Tailwind output target.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Filters ── */
+.ms-wrap { position: relative; display: inline-block; }
+.ms-button.is-filtered { border-color: var(--cz-border-light); box-shadow: 0 0 0 2px var(--cz-cyan-glow); }
+.ms-button.is-filtered .ms-btn-value { color: var(--cz-cyan); }
+.ms-chevron { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+.ms-menu-actions { display: flex; gap: 6px; align-items: center; }
+.ms-search { flex: 1; min-width: 0; padding: 4px 8px !important; font-size: 11px !important; }
+.ms-opt span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-opt em { margin-left: auto; font-style: normal; font-size: 10px; color: var(--cz-text-muted); font-family: var(--cz-font-mono); }
+.ms-opt.is-empty { opacity: .45; }
+.ms-opt input { accent-color: var(--cz-cyan); flex: 0 0 auto; }
+.ms-empty { padding: 12px; text-align: center; font-size: 11px; color: var(--cz-text-muted); }
+
+/* ── Filter chips ── */
+.vc-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 26px; }
+.vc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; font-size: 11px; border-radius: 999px;
+  border: 1px solid var(--cz-border-light); background: var(--cz-cyan-soft); color: var(--cz-text-primary); cursor: pointer; }
+.vc-chip:hover { border-color: var(--cz-bad); }
+.vc-chip b { color: var(--cz-cyan); font-weight: 700; }
+.vc-chip-reset { border-color: var(--cz-input-border); background: transparent; color: var(--cz-text-muted); }
+.vc-chip-hint { font-size: 11px; color: var(--cz-text-muted); font-style: italic; }
+
+/* ── Controls ── */
+.corr-ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--cz-text-muted); white-space: nowrap; }
+.cz-select option { background: var(--cz-input-bg); color: var(--cz-text-primary); }
+.seg-toggle:not(:has(.seg-thumb)) .seg-opt { min-width: 0; padding: 5px 12px; }
+.seg-toggle:not(:has(.seg-thumb)) .seg-opt.active { background: var(--cz-seg-thumb); color: var(--cz-seg-ink-active); box-shadow: var(--cz-seg-thumb-shadow); }
+.cz-good { color: var(--cz-good); }
+.cz-bad  { color: var(--cz-bad); }
+
+/* ── Charts ── */
+.vc-chart { min-width: 0; }
+.vc-chart-title { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--cz-text-muted); }
+.vc-chart-title span:last-child { font-weight: 500; letter-spacing: 0; text-transform: none; font-family: var(--cz-font-mono); }
+.vc-chart svg, #corr-strip svg, #corr-heatmap svg, #corr-scatter svg, #sim-contrib svg { display: block; overflow: visible; height: auto; }
+.vc-chart .hit, .vc-chart .bar-hit { cursor: pointer; }
+.vc-empty { padding: 28px; text-align: center; font-size: 12px; color: var(--cz-text-muted); }
+#corr-heatmap svg { max-width: 640px; }
+#corr-scatter { min-height: 300px; }
+
+/* ── Sparklines ── */
+.spark { display: inline-block; flex: 0 0 auto; margin-left: auto; overflow: visible; }
+.ns-spark .spark { margin-left: 0; }
+.veh-spark { display: flex; justify-content: flex-end; margin-top: 4px; opacity: .8; }
+
+/* ── KPI matrix ── */
+.kpi-group-row td { background: rgb(var(--t-s950) / .55); }
+.kpi-row.is-northstar td { background: var(--cz-northstar-soft); }
+.kpi-row.is-northstar td:first-child { box-shadow: inset 3px 0 0 var(--cz-northstar); }
+
+/* ── Category tree ── */
+.toggle-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px;
+  border-radius: 6px; color: var(--cz-cyan); flex-shrink: 0; }
+.toggle-icon[data-toggle] { cursor: pointer; }
+.toggle-icon[data-toggle]:hover { background: var(--cz-cyan-glow); }
+#matrixBody tr[data-cat] { cursor: pointer; }
+
+/* ── Insight cards ── */
+.insight-card { padding: 14px; border-radius: 14px; border: 1px solid var(--cz-border);
+  background: linear-gradient(135deg, var(--cz-card-grad-a) 0%, var(--cz-card-grad-b) 100%); box-shadow: var(--cz-card-shadow); }
+.insight-card.is-good { border-color: rgb(var(--t-e500) / .45); }
+.insight-card.is-bad  { border-color: rgb(var(--t-r500) / .45); }
+.insight-title { margin-bottom: 6px; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--cz-text-muted); }
+.insight-body { font-size: 12px; line-height: 1.55; color: var(--cz-text-primary); }
+
+/* ── Tooltip ── */
+.cz-tooltip { padding: 10px 12px; border-radius: 10px; font-size: 11px; line-height: 1.5; color: var(--cz-text-primary);
+  background: linear-gradient(135deg, var(--cz-tooltip-a) 0%, var(--cz-tooltip-b) 100%);
+  border: 1px solid var(--cz-border-light); box-shadow: var(--cz-tooltip-shadow); backdrop-filter: blur(14px); }
+.tip-h { margin-bottom: 4px; font-weight: 700; }
+.tip-sub { color: var(--cz-text-muted); font-weight: 400; }
+
+/* ── Simulator ── */
+.sim-row { padding: 10px 0; border-bottom: 1px dashed var(--cz-border); }
+.sim-row:last-child { border-bottom: 0; }
+.sim-row.is-locked { opacity: .45; }
+.sim-row-head, .sim-row-foot { display: flex; justify-content: space-between; gap: 8px; }
+.sim-row-head { font-size: 12px; font-weight: 600; color: var(--cz-text-primary); }
+.sim-row-foot { font-size: 10px; color: var(--cz-text-muted); }
+.sim-row input[type="range"] { width: 100%; accent-color: var(--cz-cyan); margin: 6px 0 2px; cursor: pointer; }
+.sim-pred-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; font-size: 11px; color: var(--cz-text-muted); }
+.sim-pred-meta b { font-family: var(--cz-font-mono); }
+.sim-model { margin-top: 10px; font-size: 10.5px; color: var(--cz-text-muted); }
+.sim-sub { margin-top: 14px; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--cz-text-muted); }
+.sim-list { margin-top: 6px; font-size: 12px; list-style: none; }
+.sim-list li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--cz-border); }
+.sim-list b { font-family: var(--cz-font-mono); }
+.sim-surf-ctl { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--cz-text-muted); }
+.sim3d-core { font-family: var(--cz-font-mono); font-size: 15px; color: #fff; }
+.sim3d-sub { font-family: var(--cz-font-mono); color: var(--cz-stage-muted); }
+#sim-canvas canvas { display: block; }
+
+/* ── Case level & modal ── */
+.cld-subtab { padding: 7px 14px; font-size: 12px; font-weight: 600; border-radius: 10px; color: var(--cz-text-muted); border: 1px solid transparent; cursor: pointer; }
+.cld-subtab:hover { color: var(--cz-text-primary); }
+.cld-subtab.active { color: var(--cz-cyan); background: var(--cz-cyan-soft); border-color: var(--cz-border-light); }
+.sort-header { cursor: pointer; user-select: none; }
+.sort-header:hover { color: var(--cz-cyan); }
+#cld-body td, #modalBody td { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-pager { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 12px 14px; border-top: 1px solid var(--cz-border); font-size: 12px; color: var(--cz-text-muted); }
+.pg-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--cz-input-border); background: var(--cz-input-bg); color: var(--cz-text-primary); cursor: pointer; }
+.pg-btn:hover:not(:disabled) { border-color: var(--cz-cyan); color: var(--cz-cyan); }
+.pg-btn:disabled { opacity: .4; cursor: not-allowed; }
+#caseModal { background: var(--cz-modal-scrim); backdrop-filter: blur(6px); }
+@keyframes vcModalUp { from { opacity: 0; transform: scale(.97) translateY(12px); } to { opacity: 1; transform: none; } }
+.animate-modal { animation: vcModalUp .3s var(--ease-glide) forwards; }
+
+/* ── Loader text ── */
+.loader-quote-text { font-size: 14.5px; line-height: 1.6; font-weight: 500; color: var(--cz-text-primary); }
+.loader-quote-author { margin-top: 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; color: var(--cz-text-muted); }
