@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VectorCore · Support Quality &amp; RCA Dashboard</title>
+
+  <!-- ═══ BOOT GUARD ═══ -->
+  <script>
+    (function () {
+      var errs = [], slow = false;
+      function paint() {
+        var q = document.getElementById('loader-quote');
+        var a = document.getElementById('loader-quote-author');
+        if (!q) return;
+        if (errs.length) {
+          q.textContent = '⚠ Dashboard failed to start: ' + errs[0];
+          q.style.color = '#FB7185';
+          if (a) a.textContent = 'Details in Console (F12)';
+        } else if (slow) {
+          q.textContent = 'Still fetching the five data sources from the server…';
+        }
+      }
+      window.addEventListener('error', function (e) {
+        errs.push((e.message || 'Unknown error') + (e.lineno ? ' — line ' + e.lineno : ''));
+        paint();
+      });
+      document.addEventListener('DOMContentLoaded', function () {
+        paint();
+        setTimeout(function () {
+          if (window.__booted || errs.length) return;
+          if (typeof window.boot !== 'function') errs.push('boot() is not defined');
+          else slow = true;
+          paint();
+        }, 8000);
+      });
+    })();
+  </script>
+
+  <!-- ═══ FOUC GUARD ═══ -->
+  <script>
+    (function () {
+      var MODE_KEY = 'sentimentRCA.themeMode', mode = 'auto';
+      try {
+        var s = localStorage.getItem(MODE_KEY);
+        if (s === 'auto' || s === 'light' || s === 'dark') mode = s;
+      } catch (e) {}
+      var resolved = mode;
+      if (mode === 'auto') {
+        var h = new Date().getHours();
+        resolved = (h >= 6 && h < 18) ? 'light' : 'dark';
+      }
+      document.documentElement.setAttribute('data-theme', resolved);
+      document.documentElement.setAttribute('data-theme-mode', mode);
+    })();
+  </script>
+
+  <!-- ═══ DATA PRE-FETCH ═══ -->
+  <script>
+    (function () {
+      window.__dataPromise = fetch('/api/v1/vectors/summary')
+        .then(function (r) {
+          if (!r.ok) throw new Error('API server returned status: ' + r.status);
+          return r.json();
+        });
+    })();
+  </script>
+
+  <!-- ═══ MASTER STYLESHEET ═══ -->
+  <link rel="stylesheet" href="/static/css/tailwind.css" />
+  <link rel="stylesheet" href="/static/css/theme.css" />
+</head>
+<body class="p-6">
+
+  <!-- ═══ TESSERACT BOOT LOADER ═══ -->
+  <div class="logo-viewport" id="tesseract-loader">
+    <div class="logo-stage">
+      <div class="logo-halo"></div>
+      <div class="logo-orbit"></div>
+      <svg id="czLogo" class="cz-logo" viewBox="0 0 1526 1290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Loading">
+        <defs>
+          <linearGradient id="czg1" x1=".2" y1="966.8" x2="910.9" y2="966.8" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3d54ce"/><stop offset="1" stop-color="#35cacf"/></linearGradient>
+          <linearGradient id="czg2" x1="447.7" y1="966.8" x2="1526.5" y2="966.8" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#13457d"/><stop offset="1" stop-color="#279698"/></linearGradient>
+          <linearGradient id="czg3" x1="-0.1" y1="322" x2="911.3" y2="322" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#090086"/><stop offset="1" stop-color="#2f96a9"/></linearGradient>
+          <linearGradient id="czg4" x1="447.7" y1="322" x2="1526.5" y2="322" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3b62ca"/><stop offset="1" stop-color="#93dfe3"/></linearGradient>
+        </defs>
+        <path class="cz-facet" style="fill:url(#czg3)" d="m910.51 278.52l-260.56 366.48h-649.95l447.940-645z"/>
+        <path class="cz-facet" style="fill:url(#czg4)" d="m1086.17 0l439.15 645-1077.38-645z"/>
+        <path class="cz-facet" style="fill:url(#czg1)" d="m649.95 645l260.56 366.48-462.57 278.52-447.94-645z"/>
+        <path class="cz-facet" style="fill:url(#czg2)" d="m1525.32 645l-439.15 645h-638.23z"/>
+      </svg>
+      <script>
+        (function () {
+          var svg = document.getElementById('czLogo'); if (!svg) return;
+          svg.querySelectorAll('.cz-facet').forEach(function (p, i) {
+            var len = 400; try { len = Math.ceil(p.getTotalLength()) || 400; } catch (e) {}
+            p.style.setProperty('--len', len); p.style.setProperty('--i', i);
+          });
+        })();
+      </script>
+    </div>
+    <div class="absolute bottom-12 left-1/2 -translate-x-1/2 w-[min(90vw,620px)] text-center px-6">
+      <p id="loader-quote" class="loader-quote-text">Aligning the North Star…</p>
+      <p id="loader-quote-author" class="loader-quote-author">Loading Sentiment, RCA, IRT, Escalation &amp; EFC sources</p>
+    </div>
+  </div>
+
+  <!-- ═══ HEADER ═══ -->
+  <header class="pb-5 border-b border-slate-800 mb-6">
+    <div class="flex flex-wrap justify-between items-start gap-4 pb-4">
+      <div>
+        <div class="flex items-center space-x-3">
+          <span class="cz-dot w-3.5 h-3.5 bg-amber-400"></span>
+          <h1 class="text-2xl font-bold tracking-tight text-white">Sentiment Moonshot · Support Quality &amp; RCA</h1>
+          <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10.5px] font-semibold tracking-wider font-mono uppercase">go/vector_core</span>
+        </div>
+        <p class="text-xs text-slate-400 mt-1">North Star: <b class="text-amber-400">Sentiment %</b> · 8 Vehicles · Pearson Correlation · What-If Simulation · Case Level Data</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center gap-2">
+          <div class="seg-toggle seg-3" id="segToggleTheme" data-val="auto" title="Light / Dark">
+            <span class="seg-thumb"></span>
+            <button type="button" class="seg-opt active" data-val="auto">Auto</button>
+            <button type="button" class="seg-opt" data-val="light">Light</button>
+            <button type="button" class="seg-opt" data-val="dark">Dark</button>
+          </div>
+          <span id="themeAutoHint" class="font-mono text-[11px] text-slate-500">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🗺️ Global Filters -->
+    <div class="flex flex-wrap items-center gap-2 pb-4">
+      <div class="ms-container" data-ms="months"             data-caption="Month"></div>
+      <div class="ms-container" data-ms="weeks"              data-caption="Week"></div>
+      <div class="ms-container" data-ms="pods"               data-caption="Pod"></div>
+      <div class="ms-container" data-ms="sdms"               data-caption="SDM"></div>
+      <div class="ms-container" data-ms="tls"                data-caption="TL"></div>
+      <div class="ms-container" data-ms="regions"            data-caption="Region"></div>
+      <div class="ms-container" data-ms="markets"            data-caption="Market"></div>
+      <div class="ms-container" data-ms="segments"           data-caption="Segment"></div>
+      <div class="ms-container" data-ms="submitterFunctions" data-caption="Function"></div>
+      <div class="ms-container" data-ms="l1"                 data-caption="L1 Category"></div>
+      <button type="button" class="cz-btn" onclick="resetAllFilters()" title="Clear all global filters">↺ Reset</button>
+    </div>
+
+    <!-- Tab Navigation -->
+    <nav class="flex flex-wrap gap-1.5 bg-slate-900/90 p-1 rounded-xl border border-slate-800 w-fit" role="tablist">
+      <button type="button" id="btn-tab-overview"    data-tab="overview"    role="tab" class="tab-btn active">🌙 Overview<kbd class="tab-key">1</kbd></button>
+      <button type="button" id="btn-tab-correlation" data-tab="correlation" role="tab" class="tab-btn">📈 Correlation<kbd class="tab-key">2</kbd></button>
+      <button type="button" id="btn-tab-simulator"   data-tab="simulator"   role="tab" class="tab-btn">🪐 What-If Simulator<kbd class="tab-key">3</kbd></button>
+      <button type="button" id="btn-tab-cases"       data-tab="cases"       role="tab" class="tab-btn">🗂 Case Level Data<kbd class="tab-key">4</kbd></button>
+    </nav>
+  </header>
+
+  <!-- ══════════ TAB 1 — OVERVIEW ══════════ -->
+  <section id="tab-overview" role="tabpanel" class="block">
+    <div class="mb-4 flex flex-wrap items-center justify-between bg-gradient-to-r from-cyan-950/30 via-slate-900/80 to-transparent p-3 rounded-xl border border-cyan-900/30 gap-3">
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider">Period Granularity</span>
+        <div class="seg-toggle" id="segToggleTime" data-val="month">
+          <span class="seg-thumb"></span>
+          <button type="button" class="seg-opt active" data-val="month"><span class="seg-dot"></span>Monthly</button>
+          <button type="button" class="seg-opt" data-val="week"><span class="seg-dot"></span>Weekly</button>
+        </div>
+      </div>
+      <span class="text-[11px] font-mono text-slate-500">Vehicle chips show Pearson r vs Sentiment · click a Vehicle to analyse it</span>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-6">
+      <div id="ov-northstar" class="xl:col-span-2"></div>
+      <div id="ov-vehicles" class="xl:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-3"></div>
+    </div>
+
+    <!-- KPI Matrix -->
+    <div class="golden-card overflow-x-auto mb-6">
+      <div class="p-3.5 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+        <div class="flex items-center space-x-2">
+          <span class="cz-dot w-2.5 h-2.5 bg-amber-400"></span>
+          <h3 class="text-xs font-bold text-white tracking-wide uppercase">North Star &amp; Vehicle KPI Matrix</h3>
+        </div>
+      </div>
+      <table class="w-full text-xs text-left" id="kpiSummaryTable">
+        <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-semibold">
+          <tr id="kpiHeaderRow"></tr>
+        </thead>
+        <tbody id="kpiSummaryBody" class="divide-y divide-slate-800/40"></tbody>
+      </table>
+    </div>
+
+    <!-- Category Breakdown -->
+    <div class="golden-card overflow-x-auto" id="card-cat-breakdown">
+      <div class="p-3.5 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+        <div class="flex items-center gap-2">
+          <span class="cz-dot cz-dot-rose w-2.5 h-2.5"></span>
+          <h3 id="catBreakdownTitle" class="text-xs font-bold text-white tracking-wide uppercase">Category Breakdown · Sentiment Detractors</h3>
+          <span id="catUnclassifiedBadge" class="text-[10.5px] font-mono text-amber-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">—</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="text-[11px] text-slate-500 font-semibold uppercase tracking-wider mr-1">Depth</span>
+          <button type="button" id="cat-lvl-btn-l1" class="lvl-btn active" onclick="setCatBreakdownDepth('l1')">L1 Category</button>
+          <button type="button" id="cat-lvl-btn-l2" class="lvl-btn" onclick="setCatBreakdownDepth('l2')">L2 Driver</button>
+          <button type="button" id="cat-lvl-btn-l3" class="lvl-btn" onclick="setCatBreakdownDepth('l3')">L3 Component</button>
+          <button type="button" id="cat-lvl-btn-l4" class="lvl-btn" onclick="setCatBreakdownDepth('l4')">L4 Detail</button>
+        </div>
+      </div>
+      <table class="w-full text-xs text-left mt-2" id="matrixTable">
+        <thead class="bg-slate-900 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider font-semibold">
+          <tr id="matrixHeaderRow"></tr>
+        </thead>
+        <tbody id="matrixBody" class="divide-y divide-slate-800/40"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ══════════ TAB 2 — CORRELATION ══════════ -->
+  <section id="tab-correlation" role="tabpanel" class="hidden">
+    <div class="golden-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="text-sm font-semibold text-white">Sentiment Correlation Lab</h3>
+        <p class="text-[11px] text-slate-500">Pearson r (with Spearman ρ check) between Sentiment % and each Vehicle.</p>
+      </div>
+      <div id="corr-controls" class="flex flex-wrap items-center gap-3"></div>
+    </div>
+    <div id="corr-insights" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4"></div>
+    <div class="golden-card p-5 mb-4">
+      <div id="corr-strip" class="w-full"></div>
+    </div>
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+      <div class="golden-card p-5">
+        <div id="corr-heatmap" class="w-full flex justify-center"></div>
+      </div>
+      <div class="golden-card p-5">
+        <div id="corr-scatter" class="w-full"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ TAB 3 — WHAT-IF SIMULATOR ══════════ -->
+  <section id="tab-simulator" role="tabpanel" class="hidden">
+    <div class="golden-card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="text-sm font-semibold text-white">What-If Simulator</h3>
+        <p class="text-[11px] text-slate-500">Move the Vehicles to see predicted Sentiment % update live in 3D.</p>
+      </div>
+      <div id="sim-controls" class="flex flex-wrap items-center gap-3"></div>
+    </div>
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+      <div class="golden-card p-4 xl:col-span-3 xl:max-h-[620px] overflow-y-auto">
+        <h4 class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">🚀 Vehicles</h4>
+        <div id="sim-sliders"></div>
+      </div>
+      <div class="golden-card p-3 xl:col-span-6">
+        <div id="sim-canvas" class="w-full"></div>
+      </div>
+      <div class="xl:col-span-3 flex flex-col gap-4">
+        <div class="golden-card p-4" id="sim-readout"></div>
+        <div class="golden-card p-4">
+          <div id="sim-contrib"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ TAB 4 — CASE LEVEL DATA ══════════ -->
+  <section id="tab-cases" role="tabpanel" class="hidden">
+    <div class="golden-card overflow-hidden">
+      <div class="p-4 bg-slate-900 border-b border-slate-800 flex flex-wrap justify-between items-center gap-3">
+        <h3 class="text-sm font-semibold text-white">Case Level Data</h3>
+        <div id="cld-subtabs" class="flex flex-wrap gap-1.5"></div>
+      </div>
+      <div id="cld-toolbar" class="p-3 border-b border-slate-800 flex flex-wrap items-center gap-3"></div>
+      <div class="overflow-x-auto min-h-[420px] max-h-[64vh]">
+        <table class="w-full text-xs text-left">
+          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider sticky top-0 z-10">
+            <tr id="cld-head-row"></tr>
+          </thead>
+          <tbody id="cld-body" class="divide-y divide-slate-800/60"></tbody>
+        </table>
+      </div>
+      <div data-pager="cld"></div>
+    </div>
+  </section>
+
+  <!-- ═══ MODAL ═══ -->
+  <div id="caseModal" class="fixed inset-0 z-50 backdrop-blur-md hidden flex items-center justify-center p-4" onclick="if (event.target.id === 'caseModal') closeCaseModal();">
+    <div class="golden-card w-full max-w-[94vw] max-h-[90vh] flex flex-col overflow-hidden border-cyan-500/40" onclick="event.stopPropagation()">
+      <div class="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center">
+        <h3 class="text-sm font-bold text-white" id="modalCategoryTitle">Detractor Cases</h3>
+        <button type="button" onclick="closeCaseModal()" class="cz-btn">✕ Close</button>
+      </div>
+      <div class="overflow-x-auto flex-1 max-h-[58vh]">
+        <table class="w-full text-xs text-left" id="modalCasesTable">
+          <thead class="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase text-[10px] tracking-wider sticky top-0 z-10">
+            <tr id="modalHeadRow"></tr>
+          </thead>
+          <tbody id="modalCasesBody" class="divide-y divide-slate-800/60"></tbody>
+        </table>
+      </div>
+      <div data-pager="modal"></div>
+    </div>
+  </div>
+
+  <!-- ═══ LOCAL LIBS & CLIENT LOGIC ═══ -->
+  <script src="/static/js/d3.v7.min.js"></script>
+  <script src="/static/js/three.min.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
