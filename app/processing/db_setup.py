@@ -5,6 +5,7 @@ Coordinates database table setups and automated SQL view compilations.
 
 import os
 import sqlite3
+
 from app.processing.load_data import run_ingestion
 
 SQL_VIEW_STATEMENT = """
@@ -74,12 +75,13 @@ LEFT JOIN esc_raw e ON s."Support Cases Case Id" = e."Support Cases Case Id"
 GROUP BY s."Support Cases Case Id";
 """
 
+
 def initialize_database():
     db_path = "data/vector_core.db"
-    
+
     # 1. Run local parquet ingestion to SQLite
     run_ingestion("data", "replace")
-    
+
     # 2. Build the database View definition
     if os.path.exists(db_path):
         conn = sqlite3.connect(db_path)
@@ -89,6 +91,7 @@ def initialize_database():
         conn.commit()
         conn.close()
         print("✓ SQL View 'dashboard_metrics_view' successfully built inside SQLite.")
+
 
 if __name__ == "__main__":
     initialize_database()

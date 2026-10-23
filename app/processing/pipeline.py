@@ -3,10 +3,11 @@ VectorCore Data Ingestion and Alignment Engine
 Optimized projection pruning: Loads ONLY required analytical columns from SQLite.
 """
 
-from typing import Dict, Any
-import pandas as pd
-import numpy as np
 import sqlite3
+from typing import Any
+
+import numpy as np
+import pandas as pd
 
 # Strict dimensions needed for filtering & UI slicing
 CATEGORICAL_DIMS = [
@@ -24,7 +25,7 @@ CATEGORICAL_DIMS = [
     "Principal Negative Sentiment Driver Category",
     "Principal Negative Sentiment Driver",
     "FRD Component",
-    "FRD Component Detail"
+    "FRD Component Detail",
 ]
 
 NUMERIC_METRIC_TARGETS = [
@@ -41,20 +42,21 @@ NUMERIC_METRIC_TARGETS = [
     "Average Time in Assigned (hours) Dr",
     "Average Case Handle Time (CHT) (minutes)",
     "Average Time to First Response (TFR) (hours) (Email)",
-    "Average Time to First Response (TFR) (hours) (Email) Dr"
+    "Average Time to First Response (TFR) (hours) (Email) Dr",
 ]
+
 
 class VectorCorePipeline:
     def __init__(self, db_path: str = "data/vector_core.db"):
         self.db_path = db_path
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Loads pruned columns from SQLite, executes fast outer joins, and yields the aggregated cube."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         tables = [row[0] for row in cursor.fetchall()]
-        
+
         if "sentiment_raw" not in tables:
             conn.close()
             return {"metadata": {"status": "empty"}, "cube": []}
@@ -62,10 +64,14 @@ class VectorCorePipeline:
         # 1. Inspect existing columns in SQLite to build a safe, pruned query
         cursor.execute("PRAGMA table_info(sentiment_raw);")
         sent_available = [row[1] for row in cursor.fetchall()]
-        
-        desired_sent = set(CATEGORICAL_DIMS + NUMERIC_METRIC_TARGETS + ["Support Cases Case Id", "Sentiment Bucket"])
+
+        desired_sent = set(
+            CATEGORICAL_DIMS
+            + NUMERIC_METRIC_TARGETS
+            + ["Support Cases Case Id", "Sentiment Bucket"]
+        )
         sent_cols_to_query = [f'"{c}"' for c in sent_available if c in desired_sent]
-        
+
         if not sent_cols_to_query:
             conn.close()
             return {"metadata": {"status": "empty"}, "cube": []}
@@ -82,10 +88,14 @@ class VectorCorePipeline:
                 "Internal Resolution Time within 24h (IRT) (%)",
                 "Internal Resolution Time within 24h (IRT) (%) (Denominator)",
                 "Cases Reopened (%)",
-                "Cases Reopened (%) (Denominator)"
+                "Cases Reopened (%) (Denominator)",
             }
             irt_cols = [f'"{c}"' for c in irt_available if c in desired_irt]
-            irt = pd.read_sql_query(f"SELECT {', '.join(irt_cols)} FROM irt_raw", conn) if irt_cols else pd.DataFrame()
+            irt = (
+                pd.read_sql_query(f"SELECT {', '.join(irt_cols)} FROM irt_raw", conn)
+                if irt_cols
+                else pd.DataFrame()
+            )
         else:
             irt = pd.DataFrame()
 
@@ -95,7 +105,11 @@ class VectorCorePipeline:
             esc_available = [row[1] for row in cursor.fetchall()]
             desired_esc = {"Support Cases Case Id", "Escalations Opened"}
             esc_cols = [f'"{c}"' for c in esc_available if c in desired_esc]
-            esc = pd.read_sql_query(f"SELECT {', '.join(esc_cols)} FROM esc_raw", conn) if esc_cols else pd.DataFrame()
+            esc = (
+                pd.read_sql_query(f"SELECT {', '.join(esc_cols)} FROM esc_raw", conn)
+                if esc_cols
+                else pd.DataFrame()
+            )
         else:
             esc = pd.DataFrame()
 
@@ -104,20 +118,26 @@ class VectorCorePipeline:
         # Step 1: Align Sentiment and IRT on Support Cases Case Id
         if not irt.empty and "Support Cases Case Id" in irt.columns:
             merged = pd.merge(
-                sent,
-                irt,
-                on="Support Cases Case Id",
-                how="left",
-                suffixes=("", "_irt")
+                sent, irt, on="Support Cases Case Id", how="left", suffixes=("", "_irt")
             )
         else:
             merged = sent
 
         # Step 2: Incorporate Escalations safely
-        if not esc.empty and "Support Cases Case Id" in esc.columns and "Escalations Opened" in esc.columns:
-            esc["Escalations Opened"] = pd.to_numeric(esc["Escalations Opened"], errors="coerce").fillna(0)
-            esc_grouped = esc.groupby("Support Cases Case Id", as_index=False)["Escalations Opened"].sum()
-            merged = pd.merge(merged, esc_grouped, on="Support Cases Case Id", how="left")
+        if (
+            not esc.empty
+            and "Support Cases Case Id" in esc.columns
+            and "Escalations Opened" in esc.columns
+        ):
+            esc["Escalations Opened"] = pd.to_numeric(
+                esc["Escalations Opened"], errors="coerce"
+            ).fillna(0)
+            esc_grouped = esc.groupby("Support Cases Case Id", as_index=False)[
+                "Escalations Opened"
+            ].sum()
+            merged = pd.merge(
+                merged, esc_grouped, on="Support Cases Case Id", how="left"
+            )
             merged["Escalations Opened"] = merged["Escalations Opened"].fillna(0)
         else:
             merged["Escalations Opened"] = 0.0
@@ -136,20 +156,50 @@ class VectorCorePipeline:
             group_cols = ["_all"]
 
         # Step 5: Fast In-Memory Aggregation Cube
-        cube = merged.groupby(group_cols, observed=True)[NUMERIC_METRIC_TARGETS].sum().reset_index()
+        cube = (
+            merged.groupby(group_cols, observed=True)[NUMERIC_METRIC_TARGETS]
+            .sum()
+            .reset_index()
+        )
 
         # Step 6: Vectorized Ratios
-        cube["sentiment_pct"] = np.where(cube["Sentiment DR"] > 0, cube["Case Sentiment Score (% Positive)"] / cube["Sentiment DR"], np.nan)
-        cube["irt_pct"] = np.where(cube["Internal Resolution Time within 24h (IRT) (%) (Denominator)"] > 0, cube["Internal Resolution Time within 24h (IRT) (%)"] / cube["Internal Resolution Time within 24h (IRT) (%) (Denominator)"], np.nan)
-        cube["reopen_rate"] = np.where(cube["Cases Reopened (%) (Denominator)"] > 0, cube["Cases Reopened (%)"] / cube["Cases Reopened (%) (Denominator)"], np.nan)
-        cube["esc_rate"] = np.where(cube["Cases Closed"] > 0, cube["Escalations Opened"] / cube["Cases Closed"], np.nan)
-        cube["avg_time_assigned"] = np.where(cube["Average Time in Assigned (hours) Dr"] > 0, cube["Average Time in Assigned (hours)"] / cube["Average Time in Assigned (hours) Dr"], np.nan)
+        cube["sentiment_pct"] = np.where(
+            cube["Sentiment DR"] > 0,
+            cube["Case Sentiment Score (% Positive)"] / cube["Sentiment DR"],
+            np.nan,
+        )
+        cube["irt_pct"] = np.where(
+            cube["Internal Resolution Time within 24h (IRT) (%) (Denominator)"] > 0,
+            cube["Internal Resolution Time within 24h (IRT) (%)"]
+            / cube["Internal Resolution Time within 24h (IRT) (%) (Denominator)"],
+            np.nan,
+        )
+        cube["reopen_rate"] = np.where(
+            cube["Cases Reopened (%) (Denominator)"] > 0,
+            cube["Cases Reopened (%)"] / cube["Cases Reopened (%) (Denominator)"],
+            np.nan,
+        )
+        cube["esc_rate"] = np.where(
+            cube["Cases Closed"] > 0,
+            cube["Escalations Opened"] / cube["Cases Closed"],
+            np.nan,
+        )
+        cube["avg_time_assigned"] = np.where(
+            cube["Average Time in Assigned (hours) Dr"] > 0,
+            cube["Average Time in Assigned (hours)"]
+            / cube["Average Time in Assigned (hours) Dr"],
+            np.nan,
+        )
 
         return {
             "metadata": {
                 "total_rows_processed": len(merged),
                 "aggregated_cube_records": len(cube),
-                "dimensions": {dim: merged[dim].dropna().unique().tolist() for dim in group_cols if dim != "_all"}
+                "dimensions": {
+                    dim: merged[dim].dropna().unique().tolist()
+                    for dim in group_cols
+                    if dim != "_all"
+                },
             },
-            "cube": cube.replace({np.nan: None}).to_dict(orient="records")
+            "cube": cube.replace({np.nan: None}).to_dict(orient="records"),
         }

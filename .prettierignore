@@ -1,0 +1,8 @@
+# Ignore minified libraries
+static/js/d3.v7.min.js
+static/js/three.min.js
+
+# Ignore python artifacts
+__pycache__/
+.venv/
+data/

@@ -8,36 +8,64 @@ Each measure is SUMmed inside its own table, then tables are outer-merged on the
 dimension keys. Ratios are only computed from summed numerators/denominators (in the
 browser), so cross-filtering never double-counts.
 """
+
 import json
 import os
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
 DIM_COLS = {
-    "month": "Time Series Month", "week": "Time Series Week", "sub_pod": "Product Sub Pod",
-    "region": "Sales Service Region", "market": "Sales Service Market",
-    "segment": "gCare Customer Segment (Final)", "ldap": "Final Assignee Username Masked",
+    "month": "Time Series Month",
+    "week": "Time Series Week",
+    "sub_pod": "Product Sub Pod",
+    "region": "Sales Service Region",
+    "market": "Sales Service Market",
+    "segment": "gCare Customer Segment (Final)",
+    "ldap": "Final Assignee Username Masked",
 }
 MAIN_DIMS = ["month", "week", "sub_pod", "region", "market", "segment"]
 AGENT_DIMS = ["ldap", "month", "sub_pod", "region", "market", "segment"]
 MEASURES = {
     "sentiment_raw": {
-        "sent_num": "Case Sentiment Score (% Positive)", "sent_den": "Sentiment DR",
+        "sent_num": "Case Sentiment Score (% Positive)",
+        "sent_den": "Sentiment DR",
         "closed": "Cases Closed",
-        "reo_num": "Cases Reopened (%)", "reo_den": "Cases Reopened (%) DR",
-        "cht_num": "Average Case Handle Time (CHT) (minutes)", "cht_den": "Average Case Handle Time (CHT) (minutes) Dr",
-        "asg_num": "Average Time in Assigned (hours)", "asg_den": "Average Time in Assigned (hours) Dr",
+        "reo_num": "Cases Reopened (%)",
+        "reo_den": "Cases Reopened (%) DR",
+        "cht_num": "Average Case Handle Time (CHT) (minutes)",
+        "cht_den": "Average Case Handle Time (CHT) (minutes) Dr",
+        "asg_num": "Average Time in Assigned (hours)",
+        "asg_den": "Average Time in Assigned (hours) Dr",
         "tfr_num": "Average Time to First Response (TFR) (hours) (Email)",
         "tfr_den": "Average Time to First Response (TFR) (hours) (Email) Dr",
         "tta_num": "Average Time to First Assign (TTA) (hours) (Email)",
         "tta_den": "Average Time to First Assign (TTA) (hours) (Email) (Denominator)",
-        "con_num": "Level 1 to Level 15 Consult (%)", "con_den": "1 to 15 DR",
+        "blk_num": "Average Time in Blocked By (hours)",
+        "blk_den": "Average Time in Blocked By (hours) Dr",
+        "nfo_num": "Average Time in Need Info (hours)",
+        "nfo_den": "Average Time in Need Info (hours) Dr",
+        "una_num": "Average Time in Unassigned (hours)",
+        "una_den": "Average Time in Unassigned (hours) Dr",
+        "tfs_num": "Average Time to First Solution Offered (TFS) (hours)",
+        "tfs_den": "Average Time to First Solution Offered (TFS) (hours) Dr",
+        "new_num": "Average Time in New (hours)",
+        "new_den": "Average Time in New (hours) Dr",
+        "agt_num": "Average Agent Time (hours)",
+        "agt_den": "Average Agent Time (hours) Dr",
+        "int_num": "Average Interactions per Closed Case",
+        "int_den": "Average Interactions per Closed Case Dr",
+        "cai_num": "Consult Average Interactions per Closed Case",
+        "cai_den": "Consult Average Interactions per Closed Case Dr",
+        "con_num": "Level 1 to Level 15 Consult (%)",
+        "con_den": "1 to 15 DR",
     },
-    "irt_raw": {"irt_num": "Internal Resolution Time within 24h (IRT) (%)",
-                "irt_den": "Internal Resolution Time within 24h (IRT) (%) (Denominator)"},
+    "irt_raw": {
+        "irt_num": "Internal Resolution Time within 24h (IRT) (%)",
+        "irt_den": "Internal Resolution Time within 24h (IRT) (%) (Denominator)",
+    },
     "esc_raw": {"esc_num": "Escalations Opened"},
 }
 ALL_MEASURES = [a for m in MEASURES.values() for a in m]
@@ -58,8 +86,12 @@ def _cols(con, table):
 
 
 def _dim_select(cols, dims):
-    return [f"COALESCE({dim_expr(a)}, '(blank)') AS {a}" if DIM_COLS[a] in cols else f"'(n/a)' AS {a}"
-            for a in dims]
+    return [
+        f"COALESCE({dim_expr(a)}, '(blank)') AS {a}"
+        if DIM_COLS[a] in cols
+        else f"'(n/a)' AS {a}"
+        for a in dims
+    ]
 
 
 def _agg(con, table, dims):
@@ -86,7 +118,9 @@ def _combine(con, dims):
     for m in ALL_MEASURES:
         if m not in out.columns:
             out[m] = 0.0
-    out[ALL_MEASURES] = out[ALL_MEASURES].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    out[ALL_MEASURES] = (
+        out[ALL_MEASURES].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    )
     return out
 
 
@@ -106,16 +140,30 @@ def _pack(df, dims, measures):
         cols[a] = s.map(idx).astype(int).tolist()
     for m in measures:
         cols[m] = [_num(x) for x in df[m].to_numpy()]
-    return {"dims": dims, "measures": measures, "vocab": vocab, "cols": cols, "rows": int(len(df))}
+    return {
+        "dims": dims,
+        "measures": measures,
+        "vocab": vocab,
+        "cols": cols,
+        "rows": len(df),
+    }
 
 
 def _det_cube(con):
     cols = _cols(con, "sentiment_raw")
-    l1 = f'COALESCE("{L1_COL}", \'Not yet RCA\'\'d\')' if L1_COL in cols else "'Not yet RCA''d'"
-    l2 = f'COALESCE("{L2_COL}", \'(unspecified)\')' if L2_COL in cols else "'(unspecified)'"
-    sql = f'''SELECT {", ".join(_dim_select(cols, MAIN_DIMS))}, {l1} AS l1, {l2} AS l2, COUNT(*) AS det
+    l1 = (
+        f"COALESCE(\"{L1_COL}\", 'Not yet RCA''d')"
+        if L1_COL in cols
+        else "'Not yet RCA''d'"
+    )
+    l2 = (
+        f"COALESCE(\"{L2_COL}\", '(unspecified)')"
+        if L2_COL in cols
+        else "'(unspecified)'"
+    )
+    sql = f"""SELECT {", ".join(_dim_select(cols, MAIN_DIMS))}, {l1} AS l1, {l2} AS l2, COUNT(*) AS det
               FROM sentiment_raw WHERE {DETRACTOR_SQL}
-              GROUP BY {", ".join(MAIN_DIMS)}, l1, l2'''
+              GROUP BY {", ".join(MAIN_DIMS)}, l1, l2"""
     return _pack(pd.read_sql_query(sql, con), MAIN_DIMS + ["l1", "l2"], ["det"])
 
 
@@ -138,17 +186,30 @@ def compute_complete_dashboard_payload(db_path="data/vector_core.db"):
         con.close()
 
     t = main[ALL_MEASURES].sum()
-    kpis = {"sentiment": _ratio(t.sent_num, t.sent_den), "irt": _ratio(t.irt_num, t.irt_den),
-            "reopen": _ratio(t.reo_num, t.reo_den), "esc_rate": _ratio(t.esc_num, t.closed),
-            "consult": _ratio(t.con_num, t.con_den), "cht": _ratio(t.cht_num, t.cht_den),
-            "time_assigned": _ratio(t.asg_num, t.asg_den), "tfr": _ratio(t.tfr_num, t.tfr_den),
-            "tta": _ratio(t.tta_num, t.tta_den), "cases_closed": int(t.closed), "escalations": int(t.esc_num)}
+    kpis = {
+        "sentiment": _ratio(t.sent_num, t.sent_den),
+        "irt": _ratio(t.irt_num, t.irt_den),
+        "reopen": _ratio(t.reo_num, t.reo_den),
+        "esc_rate": _ratio(t.esc_num, t.closed),
+        "consult": _ratio(t.con_num, t.con_den),
+        "cht": _ratio(t.cht_num, t.cht_den),
+        "time_assigned": _ratio(t.asg_num, t.asg_den),
+        "tfr": _ratio(t.tfr_num, t.tfr_den),
+        "tta": _ratio(t.tta_num, t.tta_den),
+        "cases_closed": int(t.closed),
+        "escalations": int(t.esc_num),
+    }
     return {
-        "metadata": {"generated_at": datetime.now(timezone.utc).isoformat(), "warnings": sorted(_WARNINGS)},
+        "metadata": {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "warnings": sorted(_WARNINGS),
+        },
         "kpis": kpis,
-        "cubes": {"main": _pack(main, MAIN_DIMS, ALL_MEASURES),
-                  "agents": _pack(agents, AGENT_DIMS, ALL_MEASURES),
-                  "det": det},
+        "cubes": {
+            "main": _pack(main, MAIN_DIMS, ALL_MEASURES),
+            "agents": _pack(agents, AGENT_DIMS, ALL_MEASURES),
+            "det": det,
+        },
     }
 
 
@@ -156,8 +217,10 @@ if __name__ == "__main__":
     t0 = time.time()
     p = compute_complete_dashboard_payload()
     body = json.dumps(p, separators=(",", ":"))
-    print(f"✓ compiled in {time.time() - t0:.1f}s | payload {len(body) / 1e6:.1f} MB | "
-          f"rows: { {k: v['rows'] for k, v in p['cubes'].items()} }")
+    print(
+        f"✓ compiled in {time.time() - t0:.1f}s | payload {len(body) / 1e6:.1f} MB | "
+        f"rows: { {k: v['rows'] for k, v in p['cubes'].items()} }"
+    )
     for w in p["metadata"]["warnings"]:
         print("⚠️ ", w)
     print(json.dumps(p["kpis"], indent=2))

@@ -3,8 +3,10 @@ VectorCore Configuration Manager
 Strictly isolates system credentials, global parameters, and Drive mapping vectors.
 """
 
-from typing import Dict, Any
+from typing import Any
+
 from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     APP_NAME: str = "VectorCore Security Suite"
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     EFC_RAW_SOURCE: str = "1EuEWEmq8zBpk14ADJS5iOI2QLM46fq3n"
 
     @property
-    def config_vectors(self) -> Dict[str, Dict[str, Any]]:
+    def config_vectors(self) -> dict[str, dict[str, Any]]:
         return {
             "SENTIMENT_RCA": {
                 "folder_id": self.SENTIMENT_RCA_SOURCE,
@@ -43,6 +45,7 @@ class Settings(BaseSettings):
                 "file_prefix": "efc_raw_",
             },
         }
+
 
 # Instantiate the settings class globally so app.main can import it safely
 settings = Settings()

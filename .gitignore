@@ -1,13 +1,25 @@
+# ==========================================
 # Byte-compiled / optimized / DLL files
+# ==========================================
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
+*.pyc
 *.so
 
-# Distribution / packaging
+# ==========================================
+# Virtual Environments & Python Tooling
+# ==========================================
+.venv/
+venv/
+ENV/
+env/
 .Python
+.python-version
+
+# ==========================================
+# Distribution / Packaging
+# ==========================================
 build/
 develop-eggs/
 dist/
@@ -26,26 +38,41 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
-.venv/
-venv/
-ENV/
-env/
-
-# Pyenv
-.python-version
-
-# Standalone compiler binaries
+# ==========================================
+# Standalone Compiler Binaries
+# ==========================================
 tailwindcss
 
-# Local Datasets & Configuration Caches
+
+# ==========================================
+# Local Datasets & Database Files
+# ==========================================
 data/
 *.csv
-.env
-.vscode/
-.idea/
+# Explicitly ignores any SQLite db files if they are created outside the data folder
+*.db
+*.sqlite3
+
+# ==========================================
+# Manual & Editor Backups / Temp Files
+# ==========================================
+*.bak
+*.bak[0-9]*
+*~
 *.swp
 *.swo
-__pycache__/
-*.pyc
-data/vector_core.db
+
+# ==========================================
+# IDEs and OS Metadata
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+vc_format_frontend.py
+
+# ==========================================
+# Environment Variables & Logs
+# ==========================================
+.env
+*.log

@@ -3,10 +3,9 @@ VectorCore Schema Catalog
 Strict datatype declarations matching explicit corporate header rosters.
 """
 
-from typing import Dict, Any
 import pandas as pd
 
-SCHEMA_CATALOG: Dict[str, Dict[str, str]] = {
+SCHEMA_CATALOG: dict[str, dict[str, str]] = {
     "sentiment_raw": {
         "Pod": "string",
         "Time Series Month": "string",
@@ -48,7 +47,7 @@ SCHEMA_CATALOG: Dict[str, Dict[str, str]] = {
         "Average Interactions per Closed Case": "double",
         "Average Interactions per Closed Case Dr": "double",
         "Average Handle Time (AHT) (minutes)": "double",
-        "Sentiment Explanation": "string"
+        "Sentiment Explanation": "string",
     },
     "irt_raw": {
         "Pod": "string",
@@ -73,7 +72,7 @@ SCHEMA_CATALOG: Dict[str, Dict[str, str]] = {
         "Internal Resolution Time within 24h (IRT) (%) (Denominator)": "double",
         "Cases Reopened (%)": "double",
         "Cases Reopened (%) (Denominator)": "double",
-        "Nautilus Case Summary": "string"
+        "Nautilus Case Summary": "string",
     },
     "esc_raw": {
         "Pod": "string",
@@ -91,7 +90,7 @@ SCHEMA_CATALOG: Dict[str, Dict[str, str]] = {
         "Last Outgoing Or Synchronous Communication Channel": "string",
         "Frd Business Language Display String": "string",
         "Frd Inbound Communication Channel Display String": "string",
-        "Escalations Opened": "double"
+        "Escalations Opened": "double",
     },
     "efc_raw": {
         "POD": "string",
@@ -110,9 +109,10 @@ SCHEMA_CATALOG: Dict[str, Dict[str, str]] = {
         "Quality Reviewer": "string",
         "EFC%": "double",
         "Po EFC%": "double",
-        "Quality Reviews": "double"
-    }
+        "Quality Reviews": "double",
+    },
 }
+
 
 def validate_dataframe(df: pd.DataFrame, table_name: str) -> pd.DataFrame:
     """Validates dataframe against schema catalog, sanitizing headers and datatypes."""
@@ -135,14 +135,19 @@ def validate_dataframe(df: pd.DataFrame, table_name: str) -> pd.DataFrame:
                     df[actual_col]
                     .astype(str)
                     .str.strip()
-                    .str.replace(r'\.0$', '', regex=True)
+                    .str.replace(r"\.0$", "", regex=True)
                 )
             elif expected_type == "double":
-                cleaned_df[col] = pd.to_numeric(df[actual_col], errors="coerce").fillna(0.0)
+                cleaned_df[col] = pd.to_numeric(df[actual_col], errors="coerce").fillna(
+                    0.0
+                )
             elif expected_type == "boolean":
                 cleaned_df[col] = df[actual_col].map(
-                    lambda x: True if str(x).lower() in ["true", "1", "yes"]
-                    else (False if str(x).lower() in ["false", "0", "no"] else None)
+                    lambda x: (
+                        True
+                        if str(x).lower() in ["true", "1", "yes"]
+                        else (False if str(x).lower() in ["false", "0", "no"] else None)
+                    )
                 )
             else:
                 cleaned_df[col] = df[actual_col].astype(str).str.strip()

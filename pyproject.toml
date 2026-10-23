@@ -1,0 +1,41 @@
+[project]
+name = "vector-core"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+# Target Python version matching your virtual environment (3.11)
+target-version = "py311"
+
+# Line length matching modern standards (Google uses up to 80-100; PEP 8/Ruff default is 88)
+line-length = 88
+
+# Source directories to analyze
+src = ["app"]
+
+[tool.ruff.lint]
+# Select rule sets (E=Errors, F=Pyflakes, I=isort/import-sorting, UP=pyupgrade, N=pep8-naming)
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes (syntax/bugs)
+    "I",    # isort (automatically organizes import sorting)
+    "UP",   # pyupgrade (upgrades older python syntax to py311)
+    "N",    # pep8-naming (checks snake_case and CamelCase consistency)
+    "B",    # flake8-bugbear (common design pitfalls/bugs)
+    "RUF",  # Ruff-specific rules
+]
+
+# Rules to ignore (if any)
+ignore = []
+
+[tool.ruff.lint.isort]
+# Automatically group your internal app imports separate from third-party libraries
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+# Prefer double quotes matching Google's open-source preference
+quote-style = "double"
+# Indent with 4 spaces (consistent with PEP 8 standards)
+indent-style = "space"
