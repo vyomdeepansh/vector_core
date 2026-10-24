@@ -1,12 +1,16 @@
 'use strict';
 /* ════════════════════════════════════════════════════════════════════════
-   VectorCore · static/js/app.js · v5 (stable)
+   VectorCore · static/js/app.js · v5.1
    Contract: GET /api/v1/vectors/summary →
-     { metadata{generated_at, dims?}, cube{rows, columns{dim: idx[]|str[], measure: num[]}},
-       cat_tree[], correlations{strip[], n_agents}, simulator{beta{irt, reopen, esc_rate}} }
+     { metadata{generated_at, warnings[], dims?}, kpis{…},
+       cubes{ main{dims[], measures[], vocab{dim: label[]}, cols{dim: idx[], measure: num[]}, rows},
+              agents{…}, det{…} },
+       cat_tree?[], correlations?{strip[], n_agents}, simulator?{beta{irt, reopen, esc_rate}} }
    • Every KPI = ratio-of-sums over cube rows → exact under any filter combination
+   • Reopen % = SUM(irt_raw reo_num) ÷ SUM(irt_raw reo_den) (sourced in the aggregator)
+   • Negative Cases = SUM(Sentiment DR) − SUM(Case Sentiment Score (% Positive)) → neg_cases
    • Dates: day/week → YYYY-MM-DD (2026-01-10) · month → YYYY-MM (2026-01)
-   • What-If: weighted ridge (CV-tuned λ, sign constraints, bootstrap band) + Three.js 3D stage
+   • What-If: weighted ridge (CV-tuned λ, sign constraints, bootstrap band) + 2D-canvas orbital stage
    ════════════════════════════════════════════════════════════════════════ */
 
 /* ═══ 1. CONFIG ═══ */
@@ -19,12 +23,10 @@ const DIMS = ['month', 'week', 'sub_pod', 'region', 'market', 'segment'];
 const DIM_LABEL = { month: 'Month', week: 'Week', sub_pod: 'Sub Pod', region: 'Region', market: 'Market', segment: 'Segment' };
 const MS_MAP = { month: 'month', months: 'month', week: 'week', weeks: 'week', sub_pod: 'sub_pod', pod: 'sub_pod', pods: 'sub_pod', subpods: 'sub_pod', region: 'region', regions: 'region', market: 'market', markets: 'market', segment: 'segment', segments: 'segment' };
 const BLANK_LABELS = new Set(['(blank)', '(n/a)']);
-
-const MEAS = ['sent_num', 'sent_den', 'closed', 'reo_num', 'reo_den', 'cht_num', 'cht_den', 'asg_num', 'asg_den',
+const MEAS = ['sent_num', 'sent_den', 'closed', 'neg_cases', 'reo_num', 'reo_den', 'cht_num', 'cht_den', 'asg_num', 'asg_den',
   'tfr_num', 'tfr_den', 'tta_num', 'tta_den', 'con_num', 'con_den', 'irt_num', 'irt_den', 'esc_num',
   'blk_num', 'blk_den', 'nfo_num', 'nfo_den', 'una_num', 'una_den', 'tfs_num', 'tfs_den', 'new_num', 'new_den',
   'agt_num', 'agt_den', 'int_num', 'int_den', 'cai_num', 'cai_den', 'efc_num', 'efc_den'];
-
 const ratio = (n, d) => (d > 0 ? n / d : null);
 const R = (num, den) => s => ratio(s[num], s[den]);
 
@@ -33,7 +35,7 @@ const KPIS = [
   { key: 'sentiment', label: 'Sentiment %', role: 'northstar', fmt: 'pct', hib: true, target: 0.70, needs: ['sent_num', 'sent_den'], f: R('sent_num', 'sent_den'), w: s => s.sent_den, desc: 'Case Sentiment Score (% Positive) ÷ SentimentDR' },
   /* Vehicles (8) */
   { key: 'irt', label: 'IRT 24h %', role: 'vehicle', fmt: 'pct', hib: true, target: 0.92, needs: ['irt_num', 'irt_den'], f: R('irt_num', 'irt_den'), w: s => s.irt_den, desc: 'IRT within 24h (%) ÷ IRT (%) Denominator' },
-  { key: 'reopen', label: 'Reopen %', role: 'vehicle', fmt: 'pct', hib: false, target: 0.14, needs: ['reo_num', 'reo_den'], f: R('reo_num', 'reo_den'), w: s => s.reo_den, desc: 'Cases Reopened (%) ÷ Cases Reopened (%) DR' },
+  { key: 'reopen', label: 'Reopen %', role: 'vehicle', fmt: 'pct', hib: false, target: 0.14, needs: ['reo_num', 'reo_den'], f: R('reo_num', 'reo_den'), w: s => s.reo_den, desc: 'Cases Reopened (%) ÷ Cases Reopened (%) DR · source: irt_raw' },
   { key: 'escRate', label: 'Escalation Rate', role: 'vehicle', fmt: 'pct2', hib: false, target: 0.012, needs: ['esc_num', 'closed'], f: R('esc_num', 'closed'), w: s => s.closed, desc: 'Escalations Opened ÷ Cases Closed' },
   { key: 'poEfc', label: 'poEFC %', role: 'vehicle', fmt: 'pct', hib: true, target: null /* set when agreed */, needs: ['efc_num', 'efc_den'], f: R('efc_num', 'efc_den'), w: s => s.efc_den, desc: 'PoEFC_Num ÷ Quality Reviews' },
   { key: 'consult', label: 'Consult Rate', role: 'vehicle', fmt: 'pct', hib: false, target: null, needs: ['con_num', 'con_den'], f: R('con_num', 'con_den'), w: s => s.con_den, desc: 'Consult Rate 1.5' },
@@ -42,6 +44,7 @@ const KPIS = [
   { key: 'timeInAssigned', label: 'Time in Assigned', role: 'vehicle', fmt: 'num', unit: 'h', hib: false, target: null, needs: ['asg_num', 'asg_den'], f: R('asg_num', 'asg_den'), w: s => s.asg_den, desc: 'Average Time in Assigned (hours) ÷ Dr' },
   /* Context */
   { key: 'casesClosed', label: 'Cases Closed', role: 'context', fmt: 'int', hib: true, target: null, needs: ['closed'], f: s => s.closed, w: s => s.closed, desc: 'SUM(Cases Closed)' },
+  { key: 'negativeCases', label: 'Negative Cases', role: 'context', fmt: 'int', hib: false, target: null, needs: ['neg_cases'], f: s => s.neg_cases, w: s => s.sent_den, desc: 'SUM(Sentiment DR) − SUM(Case Sentiment Score (% Positive))' },
   { key: 'escalations', label: 'Escalations Opened', role: 'context', fmt: 'int', hib: false, target: null, needs: ['esc_num'], f: s => s.esc_num, w: s => s.closed, desc: 'SUM(Escalations Opened)' },
   { key: 'tfr', label: 'TFR (Email)', role: 'context', fmt: 'num', unit: 'h', hib: false, target: null, needs: ['tfr_num', 'tfr_den'], f: R('tfr_num', 'tfr_den'), w: s => s.tfr_den, desc: 'Average Time to First Response (hours) (Email) ÷ Dr' },
   { key: 'tfs', label: 'TFS', role: 'context', fmt: 'num', unit: 'h', hib: false, target: null, needs: ['tfs_num', 'tfs_den'], f: R('tfs_num', 'tfs_den'), w: s => s.tfs_den, desc: 'Average Time to First Solution Offered (hours) ÷ Dr' },
@@ -55,7 +58,9 @@ const KPIS = [
 ];
 const DEF = Object.fromEntries(KPIS.map(k => [k.key, k]));
 const VEHICLES = KPIS.filter(k => k.role === 'vehicle').map(k => k.key);
-const VOLUME_KEYS = new Set(['casesClosed', 'escalations']);
+/* Volume counts are never levers or correlates (negativeCases is DR − positives → circular vs Sentiment) */
+const VOLUME_KEYS = new Set(['casesClosed', 'negativeCases', 'escalations']);
+const SCORECARD_EXTRA = ['casesClosed', 'negativeCases'];   // shown right after the vehicles
 const LEVERS_ALL = KPIS.filter(k => k.role !== 'northstar' && !VOLUME_KEYS.has(k.key)).map(k => k.key);
 const LEVERS_VEH = VEHICLES.slice();
 const CORR_KEYS = ['sentiment', ...VEHICLES];
@@ -244,7 +249,6 @@ function pal() {
   };
 }
 function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-
 const tip = {
   el: null,
   show(html, e) {
@@ -473,6 +477,14 @@ function findDims(p, cube) {
   const out = {}; Object.entries(found).forEach(([k, f]) => { out[k] = f.L; });
   return out;
 }
+
+/* Explicit vocab from the aggregator's _pack() — authoritative, beats heuristic discovery */
+function vocabOf(cube) {
+  const v = cube && cube.vocab, out = {};
+  if (v && typeof v === 'object') DIMS.forEach(d => { if (Array.isArray(v[d])) out[d] = v[d].map(x => (x == null ? '(blank)' : String(x))); });
+  return out;
+}
+
 /* Formats labels (dates → ISO), merges duplicates, keeps the original server labels for API filters */
 function normalizeDim(dim, codes, labels) {
   const fmt = labels.map(l => fmtLabel(dim, l));
@@ -485,15 +497,17 @@ function normalizeDim(dim, codes, labels) {
   labels.forEach((l, i) => raw[remap[i]].push(l));
   return { codes: out, labels: uniq.length ? uniq : ['(n/a)'], raw: raw.length ? raw : [['(n/a)']] };
 }
+
 function buildCube(p) {
   if (!p) throw new Error('Empty payload from server');
   const cube = p.cube || (p.cubes && (p.cubes.main || Object.values(p.cubes)[0]));
   if (!cube) throw new Error('Payload has no "cube". Top-level keys: ' + Object.keys(p).join(', '));
   const cols = cube.columns || cube.cols || cube;
-  const dimsSrc = Object.assign({}, findDims(p, cube), (p.metadata && p.metadata.dims) || {});
+  const dimsSrc = Object.assign({}, findDims(p, cube), vocabOf(cube), (p.metadata && p.metadata.dims) || {});
   const firstKey = MEAS.find(k => cols[k]) || DIMS.find(k => cols[k]);
   const n = cube.rows || cube.n || (firstKey ? cols[firstKey].length : 0);
   const d = {}, m = {}, labels = {}, raw = {}, gaps = [];
+
   DIMS.forEach(k => {
     const col = cols[k];
     let codes, L;
@@ -512,11 +526,23 @@ function buildCube(p) {
     const nd = normalizeDim(k, codes, L);
     d[k] = nd.codes; labels[k] = nd.labels; raw[k] = nd.raw;
   });
+
   const avail = new Set();
   MEAS.forEach(k => { if (cols[k]) { m[k] = Float64Array.from(cols[k], v => (isNum(+v) ? +v : 0)); avail.add(k); } else { m[k] = new Float64Array(n); gaps.push(k); } });
+
+  /* Fallback: older payloads without neg_cases → derive Sentiment DR − Case Sentiment Score (% Positive) row-wise (additive, exact) */
+  if (!avail.has('neg_cases') && avail.has('sent_den') && avail.has('sent_num')) {
+    const a = m.sent_den, b = m.sent_num, o = new Float64Array(n);
+    for (let i = 0; i < n; i++) o[i] = a[i] - b[i];
+    m.neg_cases = o; avail.add('neg_cases');
+    const gi = gaps.indexOf('neg_cases'); if (gi >= 0) gaps.splice(gi, 1);
+    console.info('[VectorCore] neg_cases not in cube → derived client-side as sent_den − sent_num');
+  }
+
   if (gaps.length) console.warn('[VectorCore] cube gaps:', gaps.join(', '));
   return { n, d, m, labels, raw, avail };
 }
+
 function applyAvailability() {
   KPIS.forEach(def => {
     def._f = def._f || def.f;
@@ -524,6 +550,7 @@ function applyAvailability() {
     def.f = def.missing ? () => null : def._f;
   });
 }
+
 function checksFor(ign) {
   const out = [];
   for (const d of DIMS) {
@@ -535,6 +562,7 @@ function checksFor(ign) {
   }
   return out;
 }
+
 /* agg() → totals · agg(dim|dims[], ignore|ignores[]) → [{idx, idxs, name, names, s}] */
 function agg(group = null, ignore = null) {
   const C = S.C, gd = group == null ? [] : [].concat(group), ign = new Set(ignore == null ? [] : [].concat(ignore));
@@ -562,6 +590,19 @@ const filterSig = () => DIMS.map(d => d + ':' + [...S.filters[d]].sort((a, b) =>
 function periodSeries() {
   const cap = S.unit === 'week' ? 13 : 6;
   return agg(S.unit).filter(x => !BLANK_LABELS.has(x.name)).sort((a, b) => String(a.name).localeCompare(String(b.name))).slice(-cap);
+}
+
+/* Boot-time sanity: unfiltered cube totals must equal the server's KPI block */
+function crossCheck(p) {
+  const k = p && p.kpis; if (!k) return;
+  const t = agg(), out = [];
+  const cmp = (name, srv, cli, tol) => { if (isNum(srv) && isNum(cli) && Math.abs(srv - cli) > tol) out.push(`${name}: server ${srv} vs cube ${cli}`); };
+  cmp('reopen', k.reopen, DEF.reopen.f(t), 5e-4);
+  cmp('negative_cases', k.negative_cases, t.neg_cases, 0.5);
+  cmp('cases_closed', k.cases_closed, t.closed, 0.5);
+  cmp('sentiment', k.sentiment, DEF.sentiment.f(t), 5e-4);
+  if (out.length) console.warn('[VectorCore] KPI cross-check mismatch:', out.join(' | '));
+  else console.info(`[VectorCore] KPI cross-check OK · reopen ${fmtV(DEF.reopen, DEF.reopen.f(t))} · negative cases ${fmtV(DEF.negativeCases, t.neg_cases)}`);
 }
 
 /* ═══ 9. FILTERS ═══ */
@@ -627,8 +668,9 @@ function renderChips() {
     return `<span class="vc-chip">${DIM_LABEL[d]}: <b>${esc(names.length > 2 ? names.length + ' selected' : names.join(', '))}</b><button type="button" data-vc-clear-dim="${d}" title="Remove">✕</button></span>`;
   }).join('');
   const tot = agg();
+  const neg = DEF.negativeCases.missing ? '' : ` · ${Math.round(tot.neg_cases).toLocaleString()} negative`;
   host.innerHTML = (chips || '<span class="vc-muted">Scope · All data</span>') +
-    `<span class="vc-muted vc-mono" style="margin-left:auto">${Math.round(tot.closed).toLocaleString()} closed · ${Math.round(tot.sent_den).toLocaleString()} scored</span>`;
+    `<span class="vc-muted vc-mono" style="margin-left:auto">${Math.round(tot.closed).toLocaleString()} closed · ${Math.round(tot.sent_den).toLocaleString()} scored${neg}</span>`;
 }
 
 /* ═══ 10. OVERVIEW ═══ */
@@ -645,6 +687,7 @@ function renderNorthStar(tot, per) {
   const host = $('ov-northstar'); if (!host) return;
   const def = DEF.sentiment, v = def.f(tot), vals = per.map(p => def.f(p.s)), d = lastDelta(vals);
   const st = tgtStatus(def, v), g = good(def, d), gap = isNum(v) ? v - def.target : null;
+  const neg = DEF.negativeCases.missing ? '' : `<span>Negative <b class="vc-mono vc-bad">${Math.round(tot.neg_cases).toLocaleString()}</b></span>`;
   host.innerHTML =
     `<div class="vc-ns ${st > 0 ? 'is-good' : st < 0 ? 'is-bad' : ''}">` +
     `<div class="vc-eyebrow">🌙 Moonshot · North Star</div>` +
@@ -654,19 +697,22 @@ function renderNorthStar(tot, per) {
     `<span class="${tone(st)}">Gap <b class="vc-mono">${fmtPP(gap)}</b></span>` +
     `<span class="${tone(g)}">${S.unit === 'week' ? 'WoW' : 'MoM'} Δ <b class="vc-mono">${fmtD(def, d)}</b></span>` +
     `<span>Scored <b class="vc-mono">${Math.round(tot.sent_den).toLocaleString()}</b></span>` +
+    neg +
     `<span>Closed <b class="vc-mono">${Math.round(tot.closed).toLocaleString()}</b></span></div></div>`;
 }
 function renderVehicles(tot, per) {
   const host = $('ov-vehicles'); if (!host) return;
   let corr = null; try { corr = getCorr(); } catch (e) { console.warn('[VectorCore] correlation failed', e); }
   const rBy = corr ? Object.fromEntries(corr.strip.map(s => [s.key, s])) : {};
-  host.innerHTML = [...VEHICLES, 'casesClosed'].map(k => {
+  host.innerHTML = [...VEHICLES, ...SCORECARD_EXTRA].map(k => {
     const def = DEF[k], v = def.f(tot), vals = per.map(p => def.f(p.s)), d = lastDelta(vals);
     const st = tgtStatus(def, v), g = good(def, d), s = rBy[k];
     const chip = def.missing ? '<span class="vc-role vc-warn">awaiting feed</span>'
-      : k !== 'casesClosed' ? `<button type="button" class="vc-r vc-mono ${s && s.aligned === false ? 'is-counter' : ''}" data-vc-corr="${k}" title="Pearson r vs Sentiment across ${DIM_LABEL[S.corr.unit]}s (p ${fmtP(s && s.p)}) · click to analyse">r ${fmtR(s && s.r)}${stars(s && s.p)}</button>`
-      : '<span class="vc-role">volume</span>';
-    const tgt = def.target != null ? `<span class="${tone(st)}">🎯 ${fmtV(def, def.target)}</span>` : '<span class="vc-muted">no target</span>';
+      : VOLUME_KEYS.has(k) ? '<span class="vc-role">volume</span>'
+        : `<button type="button" class="vc-r vc-mono ${s && s.aligned === false ? 'is-counter' : ''}" data-vc-corr="${k}" title="Pearson r vs Sentiment across ${DIM_LABEL[S.corr.unit]}s (p ${fmtP(s && s.p)}) · click to analyse">r ${fmtR(s && s.r)}${stars(s && s.p)}</button>`;
+    let tgt;
+    if (k === 'negativeCases' && isNum(v) && tot.sent_den > 0) tgt = `<span class="vc-muted" title="Negative ÷ scored (Sentiment DR)">${(v / tot.sent_den * 100).toFixed(1)}% of scored</span>`;
+    else tgt = def.target != null ? `<span class="${tone(st)}">🎯 ${fmtV(def, def.target)}</span>` : '<span class="vc-muted">no target</span>';
     return `<div class="vc-veh ${st > 0 ? 'is-good' : st < 0 ? 'is-bad' : ''} ${S.xKpi === k ? 'is-sel' : ''} ${def.missing ? 'is-missing' : ''}" data-vc-veh="${k}" title="${esc(def.desc || '')}">` +
       `<div class="vc-veh-head"><span class="vc-role">${def.role === 'vehicle' ? 'Vehicle' : 'Context'}</span>${chip}</div>` +
       `<div class="vc-veh-label">${esc(def.label)}</div>` +
@@ -1363,7 +1409,7 @@ function ocStrokeRuns(ctx, pts, front, zRef) {
 }
 const ocFade = d => clamp(1 - Math.max(0, d - G3.cam.r) / (G3.R * 2.4) * 0.5, 0.5, 1);
 
-/* ── Lifecycle (same API the rest of v5 calls) ── */
+/* ── Lifecycle ── */
 function g3Init(host) {
   if (G3.canvas) {
     if (!host.contains(G3.canvas)) { host.innerHTML = ''; host.appendChild(G3.canvas); g3Hud(host); }
@@ -1722,7 +1768,6 @@ function g3Click(e) {
   const inp = $('vc-sim-in-' + i); if (inp) inp.focus({ preventScroll: true });
 }
 
-
 /* ═══ 15. CASE LEVEL DATA (server-paginated, filter-aware) ═══ */
 const CASE_MODES = {
   scored: { label: 'Scored', source: 'sentiment', params: { scored_only: 'true' } },
@@ -2055,6 +2100,8 @@ window.boot = function boot() {
     S.C = buildCube(data);
     applyAvailability();
     console.info(`[VectorCore] cube loaded: ${S.C.n.toLocaleString()} rows · ${DIMS.map(d => d + '=' + S.C.labels[d].length).join(', ')} · missing KPIs: ${KPIS.filter(k => k.missing).map(k => k.key).join(', ') || 'none'}`);
+    (data.metadata && data.metadata.warnings || []).forEach(w => console.warn('[VectorCore] server:', w));
+    crossCheck(data);
     mountFilters(); renderChips();
     const stamp = $('data-stamp'); if (stamp) stamp.textContent = 'Data ' + fmtStamp(data.metadata && data.metadata.generated_at);
     markDirty(); switchTab('overview');

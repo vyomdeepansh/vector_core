@@ -19,7 +19,23 @@ FILES = {
 }
 
 KEY = "Support Cases Case Id"
-MONTH, WEEK = "Time Series Month", "Time Series Week"
+MONTH, WEEK, DAY = "Time Series Month", "Time Series Week", "Time Series Day"
+
+# Metric columns referenced by validation / summaries
+SENT_NUM = "Case Sentiment Score (% Positive)"
+SENT_DR = "Sentiment DR"
+REO_NUM = "Cases Reopened (%)"
+REO_DEN_SENT = "Cases Reopened (%) DR"
+REO_DEN_IRT = "Cases Reopened (%) (Denominator)"
+
+# EFC-native column names (from new schema)
+EFC_CASE = "Case Id"
+EFC_MONTH = "Qplus Review Month"
+EFC_WEEK = "Qplus Review Week"
+EFC_DAY = "Qplus Review Date"
+EFC_SEGMENT = "Customer Tier"
+EFC_OWNER = "Task Owner"
+
 DIMS = [
     MONTH,
     WEEK,
@@ -30,16 +46,46 @@ DIMS = [
     "Final Assignee Username Masked",
 ]
 
+# EFC-native dimensions (now including Case Id)
+EFC_DIMS = [
+    EFC_CASE,
+    EFC_MONTH,
+    EFC_WEEK,
+    "Product Sub Pod",
+    "Sales Service Region",
+    EFC_SEGMENT,
+    EFC_OWNER,
+]
+
+# EFC-native → canonical pipeline schema
+EFC_TO_CANONICAL_RENAME = {
+    EFC_CASE: KEY,                                 # 'Case Id' -> 'Support Cases Case Id'
+    EFC_MONTH: MONTH,                              # 'Qplus Review Month' -> 'Time Series Month'
+    EFC_WEEK: WEEK,                                # 'Qplus Review Week' -> 'Time Series Week'
+    EFC_DAY: DAY,                                  # 'Qplus Review Date' -> 'Time Series Day'
+    EFC_OWNER: "Final Assignee Username Masked",   # 'Task Owner' -> 'Final Assignee Username Masked'
+    EFC_SEGMENT: "gCare Customer Segment (Final)", # 'Customer Tier' -> 'gCare Customer Segment (Final)'
+    # Fallback variants for backwards compatibility
+    "QPlus Review Month": MONTH,
+    "QPlus Review Week": WEEK,
+    "QPlus Review Day": DAY,
+    "QPlus Review Date": DAY,
+    "gTech Ads Customer Segment": "gCare Customer Segment (Final)",
+}
+
 # Hard requirements: ingestion stops if any are missing.
 REQUIRED = {
-    "sentiment_raw": [KEY, *DIMS, "Case Sentiment Score (% Positive)", "Sentiment DR", "Cases Closed"],
+    "sentiment_raw": [KEY, *DIMS, SENT_NUM, SENT_DR, "Cases Closed"],
     "irt_raw": [
         KEY, *DIMS,
         "Internal Resolution Time within 24h (IRT) (%)",
         "Internal Resolution Time within 24h (IRT) (%) (Denominator)",
+        REO_NUM,
+        REO_DEN_IRT,
     ],
     "esc_raw": [KEY, *DIMS, "Escalations Opened"],
-    "efc_raw": [MONTH, "PoEFC_Num", "Quality Reviews"],
+    # EFC is now Case-ID level
+    "efc_raw": [EFC_CASE, EFC_MONTH, EFC_WEEK, EFC_DAY, "PoEFC_Num", "Quality Reviews"],
 }
 
 # Soft expectations: warn only. A missing metric shows as "awaiting feed" on the dashboard.
@@ -54,13 +100,20 @@ _HRS = [
     "Average Agent Time (hours)",
     "Average Interactions per Closed Case",
 ]
+
 EXPECTED = {
     "sentiment_raw": [
         "Cases Reopened (%)", "Cases Reopened (%) DR",
         "Consult Average Interactions per Closed Case",
         *[c for h in _HRS for c in (h, h + " Dr")],
     ],
-    "efc_raw": [KEY, *DIMS],  # slicing dims for poEFC; missing ones limit which filters apply
+    # Reopen % on the dashboard is sourced ONLY from irt_raw
+    "irt_raw": [REO_NUM, REO_DEN_IRT],
+    "efc_raw": [
+        *EFC_DIMS,
+        "EFC%", "Po EFC%", "MSP Site", "Review Type",
+        "Neo Campaign Type", "Quality Reviewer", "Opening Channel", "Category"
+    ],
 }
 
 DROP_TEXT = {"Qualitative Sentiment Drivers", "Nautilus Solution Offered Summary", "Nautilus Issue Summary"}
@@ -92,7 +145,8 @@ def canon_names(df, table):
 
 def numeric_cols(table, df):
     cols = REQUIRED.get(table, []) + EXPECTED.get(table, [])
-    return [c for c in dict.fromkeys(cols) if c in df.columns and c != KEY and c not in DIMS]
+    exclude = set(DIMS + EFC_DIMS + [EFC_DAY, DAY, KEY, EFC_CASE, "QPlus Review Day", "QPlus Review Date"])
+    return [c for c in dict.fromkeys(cols) if c in df.columns and c != KEY and c != EFC_CASE and c not in exclude]
 
 
 def to_num(s):
@@ -155,14 +209,61 @@ def canon_period(df, col, fmt, table):
         print(f"   ⚠ {table}.{col}: {len(bad)} value(s) not parseable as dates, kept as-is: {sorted(bad)[:5]}")
 
 
+def _warn_num_gt_den(df, table, num, den, hint):
+    """A numerator count should never exceed its denominator; if it does, it's usually on a % scale."""
+    if num in df.columns and den in df.columns:
+        bad = int((df[num] > df[den]).sum())
+        if bad:
+            print(f"   ⚠ {table}: {bad:,} row(s) where '{num}' > '{den}' — {hint}")
+
+
 def clean(df, table):
     df.columns = [norm(c) for c in df.columns]
     df = df.drop(columns=[c for c in DROP_TEXT if c in df.columns])
+
+    # EFC: early alias detection for dates, segments, and Case ID
+    if table == "efc_raw":
+        have = {_key(c): c for c in df.columns}
+        
+        # 1) Case ID alias detection
+        if _key(KEY) in have and _key(EFC_CASE) not in have:
+            df = df.rename(columns={have[_key(KEY)]: EFC_CASE})
+            
+        # 2) Date column alias detection
+        for alt_day in ["Qplus Review Date", "QPlus Review Date", "QPlus Review Day", "Qplus Review Day"]:
+            if _key(alt_day) in have and _key(EFC_DAY) not in have:
+                df = df.rename(columns={have[_key(alt_day)]: EFC_DAY})
+                break
+                
+        # 3) Segment alias detection (Customer Tier vs gTech Ads Customer Segment)
+        for alt_seg in ["Customer Tier", "gTech Ads Customer Segment"]:
+            if _key(alt_seg) in have and _key(EFC_SEGMENT) not in have:
+                df = df.rename(columns={have[_key(alt_seg)]: EFC_SEGMENT})
+                break
+
     df = canon_names(df, table)
+
+    if table == "efc_raw":
+        # a) PoEFC_Num = Po EFC% × Quality Reviews
+        if "Po EFC%" in df.columns and "Quality Reviews" in df.columns:
+            df["PoEFC_Num"] = to_num(df["Po EFC%"]) * to_num(df["Quality Reviews"])
+            print(f"   ↳ {table}: calculated 'PoEFC_Num' = 'Po EFC%' × 'Quality Reviews'")
+        
+        # Calculate standard EFC_Num if EFC% is present
+        if "EFC%" in df.columns and "Quality Reviews" in df.columns:
+            df["EFC_Num"] = to_num(df["EFC%"]) * to_num(df["Quality Reviews"])
+
+        # b) Drop canonical duplicate columns if EFC-native versions are present
+        dupes = [canon for src, canon in EFC_TO_CANONICAL_RENAME.items()
+                 if src in df.columns and canon in df.columns]
+        if dupes:
+            df = df.drop(columns=dupes)
+            print(f"   ↳ {table}: dropped {dupes} (EFC-native equivalents present)")
 
     missing = [c for c in REQUIRED.get(table, []) if c not in df.columns]
     if missing:
         raise ValueError(f"{table}: missing required columns {missing}")
+
     soft = [c for c in EXPECTED.get(table, []) if c not in df.columns]
     if soft:
         print(f"   ⚠ {table}: optional columns not found → {soft}")
@@ -181,23 +282,45 @@ def clean(df, table):
         s = s.mask(s.str.lower().isin(PLACEHOLDERS))
         df[c] = s.astype(object).where(s.notna(), None)
 
-    # 3) Case ID: no 'nan' strings, no '.0' suffix
+    # 3) Case ID: clean formatting across both KEY and EFC_CASE
     if KEY in df.columns:
         df[KEY] = fix_key(df[KEY])
+    if EFC_CASE in df.columns:
+        df[EFC_CASE] = fix_key(df[EFC_CASE])
 
-    # 4) Canonical periods: month → 2026-01 · week → 2026-01-10
-    canon_period(df, MONTH, "%Y-%m", table)
-    canon_period(df, WEEK, "%Y-%m-%d", table)
+    # 4) Canonical periods
+    if table == "efc_raw":
+        canon_period(df, EFC_MONTH, "%Y-%m", table)
+        canon_period(df, EFC_WEEK, "%Y-%m-%d", table)
+        canon_period(df, EFC_DAY, "%Y-%m-%d", table)
+    else:
+        canon_period(df, MONTH, "%Y-%m", table)
+        canon_period(df, WEEK, "%Y-%m-%d", table)
 
-    # 5) Keep narratives for scored detractors only (now safe: columns are numeric)
+    # 5) Keep narratives for scored detractors only (columns are numeric now)
     if table == "sentiment_raw" and "Sentiment Explanation" in df.columns:
-        keep = (df["Sentiment DR"] == 1) & (df["Case Sentiment Score (% Positive)"] == 0)
+        keep = (df[SENT_DR] == 1) & (df[SENT_NUM] == 0)
         df.loc[~keep, "Sentiment Explanation"] = None
 
     # 6) Denominator so AVERAGE(Consult Avg Interactions) stays exact as SUM/SUM under any filter
     cai = "Consult Average Interactions per Closed Case"
     if table == "sentiment_raw" and cai in df.columns:
         df[cai + " Dr"] = df[cai].notna().astype("int8")
+
+    # 7) Sanity checks on ratio inputs
+    if table == "irt_raw":
+        _warn_num_gt_den(df, table, REO_NUM, REO_DEN_IRT,
+                         "numerator may be stored as a percentage (e.g. 100 instead of 1)")
+    if table == "sentiment_raw":
+        _warn_num_gt_den(df, table, SENT_NUM, SENT_DR,
+                         "Negative Cases (DR − numerator) would go negative on these rows")
+
+    # 8) EFC → canonical pipeline names (renames Case Id -> Support Cases Case Id, Customer Tier -> Segment)
+    if table == "efc_raw":
+        ren = {s: t for s, t in EFC_TO_CANONICAL_RENAME.items() if s in df.columns}
+        if ren:
+            df = df.rename(columns=ren)
+            print(f"   ↳ {table}: renamed to pipeline schema {ren}")
 
     return df
 
@@ -207,6 +330,32 @@ def summarize(df, table):
         m = df[MONTH].dropna()
         if len(m):
             print(f"   months {m.min()} → {m.max()} · {m.nunique()} distinct")
+
+    # Distinct cases in EFC now that it is case-level
+    if table == "efc_raw" and KEY in df.columns:
+        n_cases = df[KEY].dropna().nunique()
+        print(f"   cases: {n_cases:,} distinct Case IDs in {table}")
+
+    # Month-wise Reopen % from irt_raw
+    if table == "irt_raw" and {MONTH, REO_NUM, REO_DEN_IRT} <= set(df.columns):
+        g = df.groupby(MONTH)[[REO_NUM, REO_DEN_IRT]].sum()
+        for mth, r in g.iterrows():
+            rate = r[REO_NUM] / r[REO_DEN_IRT] if r[REO_DEN_IRT] else float("nan")
+            print(f"   reopen {mth}: {r[REO_NUM]:,.0f} / {r[REO_DEN_IRT]:,.0f} = {rate:.2%}")
+
+    # Month-wise Negative Cases from sentiment_raw (DR − numerator)
+    if table == "sentiment_raw" and {MONTH, SENT_DR, SENT_NUM} <= set(df.columns):
+        g = df.groupby(MONTH)[[SENT_DR, SENT_NUM]].sum()
+        for mth, r in g.iterrows():
+            print(f"   negative cases {mth}: {r[SENT_DR] - r[SENT_NUM]:,.0f}")
+
+    # Month-wise poEFC from efc_raw
+    if table == "efc_raw" and {MONTH, "PoEFC_Num", "Quality Reviews"} <= set(df.columns):
+        g = df.groupby(MONTH)[["PoEFC_Num", "Quality Reviews"]].sum()
+        for mth, r in g.iterrows():
+            rate = r["PoEFC_Num"] / r["Quality Reviews"] if r["Quality Reviews"] else float("nan")
+            print(f"   poEFC {mth}: {r['PoEFC_Num']:,.1f} / {r['Quality Reviews']:,.0f} = {rate:.2%}")
+
     for c in numeric_cols(table, df):
         nn = df[c].isna().mean()
         if nn > 0.5:
@@ -225,11 +374,15 @@ def run_ingestion(source_dir="data", mode="replace", db_path=DB_PATH):
             df.to_sql(table, con, if_exists=mode, index=False, chunksize=50_000)
             print(f"✓ {table}: {len(df):,} rows, {df.shape[1]} columns")
             summarize(df, table)
-            for col in [KEY, MONTH, WEEK, "Product Sub Pod", "Final Assignee Username Masked"]:
+
+            # Standardized indices across all tables (KEY now applies to efc_raw as well)
+            idx_cols = [KEY, "Product Sub Pod", "Final Assignee Username Masked", MONTH, WEEK, DAY]
+            for col in idx_cols:
                 if col in df.columns:
                     idx = f"idx_{table}_" + "".join(ch if ch.isalnum() else "_" for ch in col.lower())
                     con.execute(f'CREATE INDEX IF NOT EXISTS "{idx}" ON "{table}"("{col}")')
-        con.execute("DROP VIEW IF EXISTS dashboard_metrics_view")  # old view assumed one row per case
+
+        con.execute("DROP VIEW IF EXISTS dashboard_metrics_view")
         con.commit()
     finally:
         con.close()

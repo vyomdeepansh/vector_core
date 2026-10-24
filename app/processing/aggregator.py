@@ -7,6 +7,11 @@ det    : month x week x sub_pod x region x market x segment x l1 x l2 -> detract
 Each measure is SUMmed inside its own table, then tables are outer-merged on the shared
 dimension keys. Ratios are only computed from summed numerators/denominators (in the
 browser), so cross-filtering never double-counts.
+
+Measure sources:
+  Reopen %        = SUM(irt_raw[Cases Reopened (%)]) / SUM(irt_raw[Cases Reopened (%) (Denominator)])
+  Negative Cases  = SUM(sentiment_raw[Sentiment DR]) - SUM(sentiment_raw[Case Sentiment Score (% Positive)])
+  PoEFC           = SUM(efc_raw[PoEFC_Num]) / SUM(efc_raw[Quality Reviews])
 """
 
 import json
@@ -26,15 +31,15 @@ DIM_COLS = {
     "segment": "gCare Customer Segment (Final)",
     "ldap": "Final Assignee Username Masked",
 }
+
 MAIN_DIMS = ["month", "week", "sub_pod", "region", "market", "segment"]
 AGENT_DIMS = ["ldap", "month", "sub_pod", "region", "market", "segment"]
+
 MEASURES = {
     "sentiment_raw": {
         "sent_num": "Case Sentiment Score (% Positive)",
         "sent_den": "Sentiment DR",
         "closed": "Cases Closed",
-        "reo_num": "Cases Reopened (%)",
-        "reo_den": "Cases Reopened (%) DR",
         "cht_num": "Average Case Handle Time (CHT) (minutes)",
         "cht_den": "Average Case Handle Time (CHT) (minutes) Dr",
         "asg_num": "Average Time in Assigned (hours)",
@@ -65,13 +70,29 @@ MEASURES = {
     "irt_raw": {
         "irt_num": "Internal Resolution Time within 24h (IRT) (%)",
         "irt_den": "Internal Resolution Time within 24h (IRT) (%) (Denominator)",
+        # Reopen % is sourced ONLY from irt_raw
+        "reo_num": "Cases Reopened (%)",
+        "reo_den": "Cases Reopened (%) (Denominator)",
     },
-    "esc_raw": {"esc_num": "Escalations Opened"},
+    "esc_raw": {
+        "esc_num": "Escalations Opened",
+    },
+    "efc_raw": {
+        "efc_num": "PoEFC_Num",
+        "efc_den": "Quality Reviews",
+    },
 }
+
 ALL_MEASURES = [a for m in MEASURES.values() for a in m]
+
+# Derived additive measures (computed after the merge; safe to SUM under any filter)
+DERIVED = ["neg_cases"]  # Sentiment DR − Case Sentiment Score (% Positive)
+CUBE_MEASURES = ALL_MEASURES + DERIVED
+
 L1_COL = "Principal Negative Sentiment Driver Category"
 L2_COL = "Principal Negative Sentiment Driver"
 DETRACTOR_SQL = '"Sentiment DR" = 1 AND "Case Sentiment Score (% Positive)" = 0'
+
 _WARNINGS = set()
 
 
@@ -83,6 +104,10 @@ def dim_expr(alias):
 
 def _cols(con, table):
     return {r[1] for r in con.execute(f'PRAGMA table_info("{table}")')}
+
+
+def _has(con, table, alias):
+    return MEASURES[table][alias] in _cols(con, table)
 
 
 def _dim_select(cols, dims):
@@ -115,12 +140,18 @@ def _combine(con, dims):
         part = _agg(con, table, dims)
         if part is not None:
             out = part if out is None else out.merge(part, on=dims, how="outer")
+
+    if out is None:
+        out = pd.DataFrame(columns=dims + ALL_MEASURES)
+
     for m in ALL_MEASURES:
         if m not in out.columns:
             out[m] = 0.0
-    out[ALL_MEASURES] = (
-        out[ALL_MEASURES].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-    )
+
+    out[ALL_MEASURES] = out[ALL_MEASURES].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+
+    # Negative Cases Count = Sentiment DR − Case Sentiment Score (% Positive)
+    out["neg_cases"] = out["sent_den"] - out["sent_num"]
     return out
 
 
@@ -151,16 +182,8 @@ def _pack(df, dims, measures):
 
 def _det_cube(con):
     cols = _cols(con, "sentiment_raw")
-    l1 = (
-        f"COALESCE(\"{L1_COL}\", 'Not yet RCA''d')"
-        if L1_COL in cols
-        else "'Not yet RCA''d'"
-    )
-    l2 = (
-        f"COALESCE(\"{L2_COL}\", '(unspecified)')"
-        if L2_COL in cols
-        else "'(unspecified)'"
-    )
+    l1 = f"COALESCE(\"{L1_COL}\", 'Not yet RCA''d')" if L1_COL in cols else "'Not yet RCA''d'"
+    l2 = f"COALESCE(\"{L2_COL}\", '(unspecified)')" if L2_COL in cols else "'(unspecified)'"
     sql = f"""SELECT {", ".join(_dim_select(cols, MAIN_DIMS))}, {l1} AS l1, {l2} AS l2, COUNT(*) AS det
               FROM sentiment_raw WHERE {DETRACTOR_SQL}
               GROUP BY {", ".join(MAIN_DIMS)}, l1, l2"""
@@ -179,17 +202,20 @@ def compute_complete_dashboard_payload(db_path="data/vector_core.db"):
     try:
         if not _cols(con, "sentiment_raw"):
             return None
+        has_reo = bool(_cols(con, "irt_raw")) and _has(con, "irt_raw", "reo_num") and _has(con, "irt_raw", "reo_den")
         main = _combine(con, MAIN_DIMS)
         agents = _combine(con, AGENT_DIMS)
         det = _det_cube(con)
     finally:
         con.close()
 
-    t = main[ALL_MEASURES].sum()
+    t = main[CUBE_MEASURES].sum()
     kpis = {
         "sentiment": _ratio(t.sent_num, t.sent_den),
         "irt": _ratio(t.irt_num, t.irt_den),
-        "reopen": _ratio(t.reo_num, t.reo_den),
+        "reopen": _ratio(t.reo_num, t.reo_den) if has_reo else None,
+        "efc": _ratio(t.efc_num, t.efc_den),
+        "quality_reviews": int(t.efc_den),
         "esc_rate": _ratio(t.esc_num, t.closed),
         "consult": _ratio(t.con_num, t.con_den),
         "cht": _ratio(t.cht_num, t.cht_den),
@@ -197,6 +223,7 @@ def compute_complete_dashboard_payload(db_path="data/vector_core.db"):
         "tfr": _ratio(t.tfr_num, t.tfr_den),
         "tta": _ratio(t.tta_num, t.tta_den),
         "cases_closed": int(t.closed),
+        "negative_cases": int(t.neg_cases),
         "escalations": int(t.esc_num),
     }
     return {
@@ -206,8 +233,8 @@ def compute_complete_dashboard_payload(db_path="data/vector_core.db"):
         },
         "kpis": kpis,
         "cubes": {
-            "main": _pack(main, MAIN_DIMS, ALL_MEASURES),
-            "agents": _pack(agents, AGENT_DIMS, ALL_MEASURES),
+            "main": _pack(main, MAIN_DIMS, CUBE_MEASURES),
+            "agents": _pack(agents, AGENT_DIMS, CUBE_MEASURES),
             "det": det,
         },
     }
@@ -216,11 +243,14 @@ def compute_complete_dashboard_payload(db_path="data/vector_core.db"):
 if __name__ == "__main__":
     t0 = time.time()
     p = compute_complete_dashboard_payload()
-    body = json.dumps(p, separators=(",", ":"))
-    print(
-        f"✓ compiled in {time.time() - t0:.1f}s | payload {len(body) / 1e6:.1f} MB | "
-        f"rows: { {k: v['rows'] for k, v in p['cubes'].items()} }"
-    )
-    for w in p["metadata"]["warnings"]:
-        print("⚠️ ", w)
-    print(json.dumps(p["kpis"], indent=2))
+    if p:
+        body = json.dumps(p, separators=(",", ":"))
+        print(
+            f"✓ compiled in {time.time() - t0:.1f}s | payload {len(body) / 1e6:.1f} MB | "
+            f"rows: { {k: v['rows'] for k, v in p['cubes'].items()} }"
+        )
+        for w in p["metadata"]["warnings"]:
+            print("⚠️ ", w)
+        print(json.dumps(p["kpis"], indent=2))
+    else:
+        print("Failed to compute payload (DB or tables missing).")
